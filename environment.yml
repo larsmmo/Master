@@ -1,0 +1,27 @@
+name: oxygenModel
+
+dependencies:
+  - python=3.7
+  - ipython
+  - ipywidgets
+  - jupyter_client
+  - jupyter_core
+  - jupyterlab
+  - matplotlib
+  - mkl-service
+  - notebook
+  - numpy=1.16
+  - pandas
+  - patsy
+  - pip
+  - pymc3
+  - pydot
+  - python-graphviz
+  - scikit-learn
+  - scipy
+  - seaborn
+  - setuptools
+  - theano
+  - xlrd
+  - pip:
+    - arviz
