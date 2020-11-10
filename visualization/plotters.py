@@ -26,7 +26,7 @@ def plot_gp(x_mesh, x, y, y_pred, y_cov, samples=[]):
     uncertainty = 1.96 * np.sqrt(np.diag(y_cov))
     print(uncertainty.shape)
     plt.figure(figsize=(16,12))
-    plt.plot(x, y, 'r.', markersize=10, label='Measurements')
+    plt.plot(x, y, label='Measurements', linestyle='none', marker='o', markersize=4, color='r')
     plt.plot(x_mesh, y_pred, 'b-', label='Prediction')
     plt.fill_between(np.ravel(x_mesh), y_pred + uncertainty, y_pred - uncertainty, alpha=0.1, label='95% confidence interval')
     """
@@ -40,6 +40,13 @@ def plot_gp(x_mesh, x, y, y_pred, y_cov, samples=[]):
         
     plt.xlabel('$x$')
     plt.ylabel('$f(x)$')
+    plt.legend(loc='upper left')
+    
+def plot_residuals(y_pred, residuals):
+    plt.scatter(y_pred, (y_test-y_pred), s=7, marker ='o', color='r', label='Residual')
+    plt.axhline(y=0.0, color='black', linestyle='-')
+    plt.xlabel('$Predicted$')
+    plt.ylabel('$Residual$')
     plt.legend(loc='upper left')
     
 def plot_gp_example(x_mesh, x, y, y_pred, y_cov, samples=[]):
