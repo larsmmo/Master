@@ -4,10 +4,10 @@ from scipy.linalg import expm, solve_continuous_lyapunov
 def gpkfEstimation(paramData, paramGpkf, meas, noiseVar):
 
 	# number of measured locations and time instants
-	[numSpaceLocs,numTimeInstants] = meas.shape
+	numSpaceLocs,numTimeInstants = meas.shape
 
 	# create DT state space model
-	[a,c,v0,q] = createDiscreteTimeSys(paramGpkf.kernel.time.num,paramGpkf.kernel.time.den,paramData.samplingTime)
+	a,c,v0,q = createDiscreteTimeSys(paramGpkf.kernel.time.num, paramGpkf.kernel.time.den, paramData.samplingTime)
 
 	# create space kernel
 	kernel_space = kernelFunction(paramGpkf.kernel.space.type, paramGpkf.kernel.space)
@@ -23,8 +23,8 @@ def gpkfEstimation(paramData, paramGpkf, meas, noiseVar):
 	for t in np.arange(1, numTimeInstant):
 	    R[:,:,t] = np.diag(noiseVar[:,t])
 
-	# compute kalmn estimate
-	[x,V,xp,Vp,exeTime,logMarginal] = kalmanEst(A,C,Q,V0,meas,R)
+	# compute kalman estimate
+	x,V,xp,Vp,exeTime,logMarginal = kalmanEst(A,C,Q,V0,meas,R)
 
 	# output function
 	posteriorMean = C*x
@@ -37,7 +37,7 @@ def gpkfEstimation(paramData, paramGpkf, meas, noiseVar):
 	outputCov = O3
 	outputCovPred = O3
 
-	for t in np.arange(1, numTimeInstants + 1):
+	for t in np.arange(0, numTimeInstants):
 	    
 	    # extract variance
 	    posteriorCov[:,:,t] = C * V[:,:,t] * C.conj().T
@@ -47,6 +47,32 @@ def gpkfEstimation(paramData, paramGpkf, meas, noiseVar):
 	    outputCov[:,:,t] = posteriorCov[:,:,t] + R[:,:,t]
 	    outputCovPred[:,:,t] = posteriorCovPred[:,:,t] + R[:,:,t]
 
+	return posteriorMean, posteriorCov, logMarginal
+
+
+def gpkfPrediction(paramData, paramGpkf, meas, noiseVar):
+
+	postMean, postCov, logMarginal = gpkfEstimation(paramData, paramGpkf, meas, noiseVar)
+
+	kernel_space = kernelFunction(paramGpkf.kernel.space.type, paramGpkf.kernel.space)
+	kernelSection = kernelSampled(paramData.spaceLocsPred, paramData.spaceLocsMeas, kernel_space)
+	kernelPrediction = kernelSampled(paramData.spaceLocsPred, paramData.spaceLocsPred, kernel_space)
+	Ks = kernelSampled(paramData.spaceLocsMeas, paramData.spaceLocsMeas, kernel_space)
+	I = np.eye(Ks.shape)
+	Ks_inv = I/Ks
+
+	numSpaceLocsPred = np.max(paramData.spaceLocsPred.shape)
+	numTimeInsts = np.max(paramData.timeInstants.shape)
+	predictedCov = np.zeros((numSpaceLocsPred, numSpaceLocsPred, numTimeInsts))
+	scale = paramGpkf.kernel.time.scale
+
+	predictedMean = kernelSection * (Ks_inv * postMean)
+	        
+	for t in np.arange(0,np.max(paramData.timeInstants.shape)):
+	    W = Ks_inv * (Ks - postCov[:,:,t]/scale) * Ks_inv
+	    predictedCov[:,:,t] = scale * (kernelPrediction - (kernelSection * W * kernelSection.conj().T))
+
+	return preditedMean, predictedCov
 
 def createDiscreteTimeSys(num_coeff, den_coeff, Ts):
 	# state dimension
@@ -70,11 +96,13 @@ def createDiscreteTimeSys(num_coeff, den_coeff, Ts):
 	V = scipy.linalg.solve_continuous_lyapunov(F,G*G.conj().T)
 
 	# discretization of the noise matrix
-	Q = np.zeros(stateDim);
-	Ns = 10000;                   
-	t = Ts/Ns;
-	for n in np.arange(t, Ts, step=t):
+	Q = np.zeros(stateDim)
+	Ns = 10000        
+	t = Ts/Ns
+	for n in np.arange(t, Ts+t, step=t):
 	    Q = Q + t * scipy.linalg.expm(F*n)*(G*G.conj().T)*scipy.linalg.expm(F*n).conj().T;
+
+	return A, C, V, Q
 
 
 def kalmanEst(A, C, Q, V0, meas, noiseVar):
@@ -100,13 +128,13 @@ def kalmanEst(A, C, Q, V0, meas, noiseVar):
 	    Vpt = A*Vt*A.conj().T + Q
 	    
 	    # correction
-	    notNanPos = ~np.isnan(meas[:,t])
+	    notNanPos = np.logical_not(np.isnan(meas[:,t]))
 	    Ct = C[notNanPos,:]
 	    Rt = noiseVar[notNanPos, notNanPos, t]
 	    
 	    innovation = meas[notNanPos,t] -  Ct * xpt
 	    innovVar = Ct * Vpt * Ct.conj().T + Rt
-	    K = (Vpt * Ct.conj().T)/innovVar;   # kalman gain
+	    K = (Vpt * Ct.conj().T)/innovVar   # kalman gain
 	    correction = K*innovation
 	    
 	    xt = xpt + correction
@@ -123,4 +151,4 @@ def kalmanEst(A, C, Q, V0, meas, noiseVar):
 	    l2 = innovation.conj().T * np.linalg.lstsq(innovVar, innovation)[0]
 	    logMarginal = logMarginal +  0.5*(np.size(innovation, axis=1)*log(2*pi) + l1 + l2)
 	    
-	return (x, V, xp, Vp, logMarginal)
+	return x, V, xp, Vp, logMarginal

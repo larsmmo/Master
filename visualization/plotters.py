@@ -43,7 +43,7 @@ def plot_gp(x_mesh, x, y, y_pred, y_cov, samples=[]):
     plt.legend(loc='upper left')
     
 def plot_residuals(y_pred, residuals):
-    plt.scatter(y_pred, (y_test-y_pred), s=7, marker ='o', color='r', label='Residual')
+    plt.scatter(y_pred, residuals, s=7, marker ='o', color='r', label='Residual')
     plt.axhline(y=0.0, color='black', linestyle='-')
     plt.xlabel('$Predicted$')
     plt.ylabel('$Residual$')
