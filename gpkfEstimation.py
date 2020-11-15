@@ -19,7 +19,7 @@ class Gpkf:
 
         # create space kernel
         kernel_space = kernelFunction(self.params.gpkf['kernel']['space']['type'], self.params.gpkf['kernel']['space'])
-        Ks_chol = np.linalg.chol(kernelSampled(self.params.data['spaceLocsMeas'], self.params.data['spaceLocsMeas'], kernel_space)).conj().T
+        Ks_chol = np.linalg.cholesky(kernelSampled(self.params.data['spaceLocsMeas'], self.params.data['spaceLocsMeas'], kernel_space)).conj().T
 
         # initialize quantities needed for kalman estimation
         I = np.eye(numSpaceLocs)
@@ -86,37 +86,35 @@ def createDiscreteTimeSys(num_coeff, den_coeff, Ts):
     # state dimension
     stateDim  = np.max(den_coeff.shape)
 
-    # state matrix
-    F = np.diag(np.ones((1,stateDim-1)).tolist(),1).copy()
-    print(np.ones((1,stateDim-1)).tolist())
-    F[stateDim-1] = -den_coeff
-
-    # input matrix
-    G = np.array([np.zeros((stateDim-1 ,1)).tolist() , 1])
-    print(G)
-
+    if stateDim ==1:
+        F = -den_coeff       # state matrix
+        A = np.exp(F * Ts)   # Discretization
+        G = np.array([1])
+    else:
+        F = np.diag(np.ones((1,stateDim-1)),1).copy()
+        F[stateDim-1] = -den_coeff
+        A = expm(F * Ts)  # state matrix
+        G = np.vstack([np.zeros((stateDim-1,1)),1]) # input matrix
+    
     # output matrix
     C = np.zeros((1,stateDim))
     C[0:np.max(num_coeff.shape)] = num_coeff
 
-    # discretization
-    A = expm(np.matmul(F,Ts))  # state matrix
-
     # state variance as solution of the lyapunov equation
-    print(F)
-    print('-----')
-    print(np.matmul(G, G.conj().T[0]))
-    V = solve_continuous_lyapunov(F, np.matmul(G, G.conj().T))
+    V = solve_continuous_lyapunov(F, -np.matmul(G, G.conj().T))
 
     # discretization of the noise matrix
     Q = np.zeros(stateDim)
     Ns = 10000        
     t = Ts/Ns
-    for n in np.arange(t, Ts+t, step=t):
-        Q = Q + np.linalg.multi_dot([t, expm(np.matmul(F,n)), np.matmul(G,G.conj().T),expm(np.matmul(F,n)).conj().T])
+    if stateDim == 1:
+        for n in np.arange(t, Ts+t, step=t):
+            Q = Q + t * np.exp(np.dot(F,n)) * np.dot(G,G.conj().T) * np.exp(np.dot(F,n)).conj().T
+    else:
+        for n in np.arange(t, Ts+t, step=t):
+            Q = Q + np.linalg.multi_dot([t, expm(np.dot(F,n)), np.dot(G,G.conj().T), expm(np.dot(F,n)).conj().T])
 
     return A, C, V, Q
-
 
 def kalmanEst(A, C, Q, V0, meas, noiseVar):
 

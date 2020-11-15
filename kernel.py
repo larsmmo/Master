@@ -20,7 +20,7 @@ def kernelFunction(type, params):
         ks = kernelFunction(params['space']['type'], params['space']['scale'], params['space']['std'])
         kt = kernelFunction(params['time']['type'], params['time']['scale'], params['time']['std'])
         def kernel(x1,x2):
-            return np.dot(kt(x1[0],x2[0]), ks(x1[1:end],x2[1:end]))
+            return np.matmul(kt(x1[0],x2[0]), ks(x1[1:end],x2[1:end]))
     
     elif type == 'exponential':
         scale = params['scale']
