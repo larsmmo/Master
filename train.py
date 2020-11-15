@@ -1,10 +1,20 @@
 import numpy as np
+from params import Params
 from gpkfEstimation import Gpkf
+from generateSyntheticData import generateSyntheticData
 
 def start_train():
-	model = Gpkf()
 	params = Params()
-	model.estimation(params)
+	model = Gpkf(params)
+
+	F, Y, noiseVar = generateSyntheticData(params.data)
+
+	# GPKF estimate
+	posteriorMean, posteriorCov, logMarginal = model.estimation(Y, noiseVar)
+
+	#GPKF prediction
+	preditedMean, predictedCov = model.prediction(Y, noiseVar)
+	
 	return model
 
 def main():

@@ -52,14 +52,14 @@ class Params(object):
         self.data['timeInstants'] = np.arange(self.data['startTime'], self.data['endTime'] + self.data['samplingTime'], self.data['samplingTime']).conj().T
 
         if self.gpkf['kernel']['time']['type'] == 'exponential':
-            self.gpkf['kernel']['time']['num'] = np.sqrt(2*self.gpkf['kernel']['time']['scale'] / self.gpkf['kernel']['time']['std'])
-            self.gpkf['kernel']['time']['den'] = 1/self.gpkf['kernel']['time']['std']
+            self.gpkf['kernel']['time']['num'] = np.array([np.sqrt(2*self.gpkf['kernel']['time']['scale'] / self.gpkf['kernel']['time']['std'])])
+            self.gpkf['kernel']['time']['den'] = np.array([1/self.gpkf['kernel']['time']['std']])
             
         elif self.gpkf['kernel']['time']['type'] == 'periodic':
-            self.gpkf['kernel']['time']['num'] = np.sqrt(2*self.gpkf['kernel']['time']['scale'] / self.gpkf['kernel']['time']['std']) * np.array([np.sqrt((1/self.gpkf['kernel']['time']['std'])**2 + (2*pi*self.gpkf['kernel']['time']['frequency'])**2) , 1])
+            self.gpkf['kernel']['time']['num'] = np.array([np.sqrt(2*self.gpkf['kernel']['time']['scale'] / self.gpkf['kernel']['time']['std']) * np.array([np.sqrt((1/self.gpkf['kernel']['time']['std'])**2 + (2*pi*self.gpkf['kernel']['time']['frequency'])**2) , 1])])
                     
             self.gpkf['kernel']['time']['den'] = np.array([((1/self.gpkf['kernel']['time']['std'])**2 + (2*pi*self.gpkf['kernel']['time']['frequency'])**2 ), 2/self.gpkf['kernel']['time']['std']])
-            
+
         else:
             print('Not admissible kernel type')
 
