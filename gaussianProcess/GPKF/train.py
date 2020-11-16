@@ -13,14 +13,14 @@ def start_train():
 	posteriorMean, posteriorCov, logMarginal = model.estimation(Y, noiseVar)
 
 	#GPKF prediction
-	preditedMean, predictedCov = model.prediction(Y, noiseVar)
-	
+	predictedMean, predictedCov = model.prediction(Y, noiseVar)
+
 	return model
 
 def main():
+	print('Starting training')
 	model = start_train()
+	print('Finished training')
 
 if __name__ == '__main__':
-	print('Running train')
 	main()
-	print('Finished main')

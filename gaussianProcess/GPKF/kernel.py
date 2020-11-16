@@ -15,7 +15,6 @@ def kernelFunction(type, params):
 
     OUTPUT: kernel: kernel function
     """
-
     if type == 'separable':
         ks = kernelFunction(params['space']['type'], params['space']['scale'], params['space']['std'])
         kt = kernelFunction(params['time']['type'], params['time']['scale'], params['time']['std'])
@@ -26,7 +25,7 @@ def kernelFunction(type, params):
         scale = params['scale']
         std_dev = params['std']
         def kernel(x1,x2):
-            return np.dot(scale, np.exp(-np.linalg.norm(x1-x2) / std_dev))  
+            return scale *np.exp(-np.linalg.norm(x1-x2) / std_dev)
 
     elif type == 'gaussian':
         scale = params['scale']

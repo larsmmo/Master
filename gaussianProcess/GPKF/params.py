@@ -12,7 +12,7 @@ class Params(object):
         self.data['startTime'] = 0
         self.data['endTime'] = 10
                 
-        self.data['noiseStd'] = 0.5
+        self.data['noiseStd'] = 0.316
 
         self.data['kernel'] = {}
 
@@ -62,13 +62,3 @@ class Params(object):
 
         else:
             print('Not admissible kernel type')
-
-
-"""
-        elif self.gpkf['kernel']['time']['type'] == 'gaussian':
-            self.gpkf['kernel']['time']['ssDim'] = 6
-            load(strcat('./data/gaussian_time_kernel_approximations/ssDim=', num2str(self.gpkf['kernel']['time']['ssDim']),'_for_scale=1_std=1.mat'))
-            self.gpkf['kernel']['time']['num'] = num
-            self.gpkf['kernel']['time']['den'] = den
-            clear num den
-        """
