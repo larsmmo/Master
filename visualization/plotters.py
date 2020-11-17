@@ -15,12 +15,24 @@ def plot_gp(mu, cov, X, X_train=None, Y_train=None, samples=[]):
     fig = plt.subplots(figsize = (8,8))
     plt.fill_between(X, mu + uncertainty, mu - uncertainty, alpha=0.1)
     plt.plot(X, mu, label='Mean')
-    for i, sample in enumerate(samples):
+    for i, sample in enumerate(samples): 
         plt.plot(X, sample, lw=1, ls='--', label=f'Sample {i+1}')
     if X_train is not None:
         plt.plot(X_train, Y_train, 'rx')
     plt.legend()
 """
+
+def plot_gpkf(x_mesh, x, y, y_pred, y_cov, samples=[]):
+    uncertainty = 3 * np.sqrt(np.abs(np.diag(y_cov)))
+    plt.figure(figsize=(16,12))
+    
+    plt.plot(x, y, linestyle='none', marker='o', markersize=4, color='r')
+    plt.plot(x_mesh, y_pred, 'b-', label='Prediction')
+    plt.fill_between(np.ravel(x_mesh), y_pred + uncertainty, y_pred - uncertainty, alpha=0.1, label='95% confidence interval')
+        
+    plt.xlabel('$x$')
+    plt.ylabel('$f(x)$')
+    plt.legend(loc='upper left')
 
 def plot_gp(x_mesh, x, y, y_pred, y_cov, samples=[]):
     uncertainty = 1.96 * np.sqrt(np.diag(y_cov))

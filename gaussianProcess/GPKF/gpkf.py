@@ -16,7 +16,7 @@ class Gpkf:
 
         # create DT state space model
         a,c,v0,q = createDiscreteTimeSys(self.params.gpkf['kernel']['time']['num'], self.params.gpkf['kernel']['time']['den'], self.params.data['samplingTime'])
-
+        
         # create space kernel
         kernel_space = kernelFunction(self.params.gpkf['kernel']['space']['type'], self.params.gpkf['kernel']['space'])
         Ks_chol = np.linalg.cholesky(kernelSampled(self.params.data['spaceLocsMeas'], self.params.data['spaceLocsMeas'], kernel_space)).conj().T
@@ -24,7 +24,7 @@ class Gpkf:
         # initialize quantities needed for kalman estimation
         I = np.eye(numSpaceLocs)
         A = np.kron(I,a)
-        C = np.matmul(Ks_chol, np.kron(I,c))
+        C = Ks_chol @ np.kron(I,c)
         V0 = np.kron(I,v0)
         Q = np.kron(I,q)
         R = np.zeros((numSpaceLocs, numSpaceLocs, numTimeInstants))
@@ -72,7 +72,6 @@ class Gpkf:
         numTimeInsts = np.max(self.params.data['timeInstants'].shape)
         predictedCov = np.zeros((numSpaceLocsPred, numSpaceLocsPred, numTimeInsts))
         scale = self.params.gpkf['kernel']['time']['scale']
-
         predictedMean = np.matmul(kernelSection, np.matmul(Ks_inv, postMean))
                 
         for t in np.arange(0, numTimeInsts):
@@ -84,16 +83,14 @@ class Gpkf:
 def createDiscreteTimeSys(num_coeff, den_coeff, Ts):
     # state dimension
     stateDim  = np.max(den_coeff.shape)
-
+    print(stateDim)
     if stateDim ==1:
-        print('1 dim')
         F = -den_coeff       # state matrix
         A = np.exp(F * Ts)   # Discretization
         G = np.array([1])
     else:
-        print('more dims')
-        F = np.diag(np.ones((1,stateDim-1)),1).copy()
-        F[stateDim-1] = -den_coeff
+        F = np.diag(np.ones((1,stateDim-1)).flatten(),1).copy()
+        F[stateDim-1, :] = -den_coeff
         A = expm(F * Ts)  # state matrix
         G = np.vstack([np.zeros((stateDim-1,1)),1]) # input matrix
     
@@ -113,7 +110,8 @@ def createDiscreteTimeSys(num_coeff, den_coeff, Ts):
             Q = Q + t * np.exp(np.dot(F,n)) * np.dot(G,G.conj().T) * np.exp(np.dot(F,n)).conj().T
     else:
         for n in np.arange(t, Ts+t, step=t):
-            Q = Q + np.linalg.multi_dot([t, expm(np.dot(F,n)), np.dot(G,G.conj().T), expm(np.dot(F,n)).conj().T])
+            #Q = Q + np.linalg.multi_dot([t, expm(np.dot(F,n)), np.dot(G,G.conj().T), expm(np.dot(F,n)).conj().T])
+            Q = Q + t * expm(F * n) @ (G @G.conj().T) @ (expm(F * n)).conj().T
     
     return A, C, V, Q
 
@@ -132,8 +130,7 @@ def kalmanEst(A, C, Q, V0, meas, noiseVar):
     Vp = np.zeros((stateDim,stateDim,numTimeInstants))
     x = np.zeros((stateDim,numTimeInstants))
     V = np.zeros((stateDim,stateDim,numTimeInstants))
-    
-    #print(noiseVar)
+
     for t in np.arange(0, numTimeInstants):
         # prediction
         xpt = np.matmul(A,xt)
