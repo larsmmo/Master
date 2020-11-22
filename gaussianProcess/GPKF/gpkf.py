@@ -61,6 +61,8 @@ class Gpkf:
                bounds=((1e-5, 1e+5), (1e-5, 1e+5), (1e-5, 1e+5), (1e-5, 1e+5)),
                method='L-BFGS-B')
         
+        print('First run:', res.fun)
+        
         for r in np.arange(0, n_restarts):
             print('Optimizer restart:', r+1, ' of ',  n_restarts)
             

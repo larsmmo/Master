@@ -23,7 +23,10 @@ def plot_gp(mu, cov, X, X_train=None, Y_train=None, samples=[]):
 """
 
 def plot_gpkf(x_mesh, x, y, y_pred, y_cov, samples=[]):
-    uncertainty = 3 * np.sqrt(np.abs(np.diag(y_cov)))
+    if y_cov.ndim > 1:
+        uncertainty = 3 * np.sqrt(np.abs(np.diag(y_cov)))
+    else:
+        uncertainty = 3 * np.sqrt(np.abs(np.squeeze(y_cov)))
     plt.figure(figsize=(16,12))
     
     plt.plot(x, y, linestyle='none', marker='o', markersize=4, color='r', label='Measurements') # linestyle='none', marker='o',
@@ -37,16 +40,20 @@ def plot_gpkf(x_mesh, x, y, y_pred, y_cov, samples=[]):
     plt.ylabel('$f(x)$')
     plt.legend(loc='upper left')
     
-def plot_gpkf_space_time(params, xs, xt, F, posteriorMean, posteriorCov, predictedMean, predictedCov, timeIndex =-1, samples=[]):
+def plot_gpkf_space_time(params, F, posteriorMean, posteriorCov, predictedMean, predictedCov, timeIndex =-1, samples=[]):
     plt.subplot(2,2)
-    plot_gpkf(params.data['spaceLocsMeas'], xs, F[:,timeIndex], posteriorMean[:,timeIndex], posteriorCov[:,:,timeIndex])
+    # Space
+    plot_gpkf(params.data['spaceLocsMeas'], params.data['spaceLocs'], F[:,timeIndex], posteriorMean[:,timeIndex], posteriorCov[:,:,timeIndex])
     plt.title('GPKF space estimation')
-    plot_gpkf(params.data['spaceLocsPred'], params.data['timeInstants'], F[:,timeIndex], predictedMean[:,timeIndex], predictedCov[:,:,timeIndex])
+    plot_gpkf(params.data['spaceLocsPred'], params.data['spaceLocs'], F[:,timeIndex], predictedMean[:,timeIndex], predictedCov[:,:,timeIndex])
     plt.title('GPKF space prediction')
-    plot_gpkf(params.data['spaceLocsMeas'], xs, F[:,timeIndex], posteriorMean[:,timeIndex], posteriorCov[:,:,timeIndex])
-    plt.title('GPKF time estimation')
-    plot_gpkf(params.data['spaceLocsPred'], params.data['timeInstants'], F[:,timeIndex], predictedMean[:,timeIndex], predictedCov[:,:,timeIndex])
-    plt.title('GPKF time prediction')
+    
+    # Time
+    for i in params.data['spaceLocs']:
+        plot_gpkf(params.data['spaceLocsMeas'], params.data['timeInstants'], F[i,:], posteriorMean[i,:], posteriorCov[i,i,:])
+        plt.title('GPKF time estimation')
+        plot_gpkf(params.data['spaceLocsPred'], params.data['timeInstants'], F[i,:], predictedMean[i,:], predictedCov[i,i,:])
+        plt.title('GPKF time prediction')
 
 def plot_gp(x_mesh, x, y, y_pred, y_cov, samples=[]):
     uncertainty = 1.96 * np.sqrt(np.diag(y_cov))

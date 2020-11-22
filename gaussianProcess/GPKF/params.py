@@ -67,7 +67,7 @@ class Params(object):
 
             self.data['kernel']['time'] = {}
             self.data['kernel']['time']['type'] = 'exponential'    #'exponential', 'gaussian', 'periodic'
-            self.data['kernel']['time']['scale'] = 10            # NOTE: to use gaussian kernel with GPKF
+            self.data['kernel']['time']['scale'] = 0.3            # NOTE: to use gaussian kernel with GPKF
             self.data['kernel']['time']['std'] = 1            # scale and std must be set to 1
             self.data['kernel']['time']['frequency'] = 1
             
