@@ -27,7 +27,7 @@ def plot_gpkf(x_mesh, x, y, y_pred, y_cov, samples=[]):
         uncertainty = 3 * np.sqrt(np.abs(np.diag(y_cov)))
     else:
         uncertainty = 3 * np.sqrt(np.abs(np.squeeze(y_cov)))
-    plt.figure(figsize=(16,12))
+    #plt.figure(num = None, figsize=(16,12))
     
     plt.plot(x, y, linestyle='none', marker='o', markersize=4, color='r', label='Measurements') # linestyle='none', marker='o',
     plt.plot(x_mesh, y_pred, 'b-', label='Prediction')
@@ -40,19 +40,23 @@ def plot_gpkf(x_mesh, x, y, y_pred, y_cov, samples=[]):
     plt.ylabel('$f(x)$')
     plt.legend(loc='upper left')
     
-def plot_gpkf_space_time(params, F, posteriorMean, posteriorCov, predictedMean, predictedCov, timeIndex =-1, samples=[]):
-    plt.subplot(2,2)
+def plot_gpkf_space_time(params, F, posteriorMean, posteriorCov, predictedMean, predictedCov, timeIndex =-1, spaceIndexes = [], samples=[]):
+    plt.figure(num = None, figsize=(16,12))
+    plt.subplot(2,2,1)
     # Space
     plot_gpkf(params.data['spaceLocsMeas'], params.data['spaceLocs'], F[:,timeIndex], posteriorMean[:,timeIndex], posteriorCov[:,:,timeIndex])
     plt.title('GPKF space estimation')
+    plt.subplot(2,2,2)
     plot_gpkf(params.data['spaceLocsPred'], params.data['spaceLocs'], F[:,timeIndex], predictedMean[:,timeIndex], predictedCov[:,:,timeIndex])
     plt.title('GPKF space prediction')
     
     # Time
-    for i in params.data['spaceLocs']:
-        plot_gpkf(params.data['spaceLocsMeas'], params.data['timeInstants'], F[i,:], posteriorMean[i,:], posteriorCov[i,i,:])
+    for i in spaceIndexes:
+        plt.subplot(2,2,3)
+        plot_gpkf(params.data['timeInstants'], params.data['timeInstants'], F[i,:], posteriorMean[i,:], posteriorCov[i,i,:])
         plt.title('GPKF time estimation')
-        plot_gpkf(params.data['spaceLocsPred'], params.data['timeInstants'], F[i,:], predictedMean[i,:], predictedCov[i,i,:])
+        plt.subplot(2,2,4)
+        plot_gpkf(params.data['timeInstants'], params.data['timeInstants'], F[i,:], predictedMean[i,:], predictedCov[i,i,:])
         plt.title('GPKF time prediction')
 
 def plot_gp(x_mesh, x, y, y_pred, y_cov, samples=[]):

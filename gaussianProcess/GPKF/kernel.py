@@ -28,6 +28,9 @@ class Kernel(ABC):
     @abstractmethod
     def kernelFunction(self):
          raise NotImplementedError("No default kernel. Please specify a type (exponential, periodic etc.)")
+            
+    def get_psd(self):
+        raise NotImplementedError("No default kernel. Please specify a type (exponential, periodic etc.)")
 
     def sampled(self, input_set_1, input_set_2):
         """
@@ -83,22 +86,28 @@ class ExponentialKernel(Kernel):
     def __init__(self, params):
         super().__init__(params)
         
-        self.num = np.array([np.sqrt(2*self.scale / self.std)])
-        self.den = np.array([1/self.std])
-        
     def kernelFunction(self, x1, x2):
         return self.scale * np.exp(-np.linalg.norm(x1-x2) / self.std)
+    
+    def get_psd(self):
+        num = np.array([np.sqrt(2*self.scale / self.std)])
+        den = np.array([1/self.std])
+        
+        return num, den
     
     
 class PeriodicKernel(Kernel):
     def __init__(self, params):
         super().__init__(params)
         
-        self.num = np.array([np.sqrt(2*self.scale / self.std) * np.array([np.sqrt((1/self.std)**2 + (2*np.pi*self.frequency)**2) , 1])])         
-        self.den = np.array([((1/self.std)**2 + (2*np.pi*self.frequency)**2 ), 2/self.std])
-    
     def kernelFunction(x1,x2):
         return self.scale * np.cos(2*pi*self.frequency * np.linalg.norm(x1-x2)) * np.exp(-np.linalg.norm(x1-x2)/self.std)
+    
+    def get_psd(self):
+        num = np.array([np.sqrt(2*self.scale / self.std) * np.array([np.sqrt((1/self.std)**2 + (2*np.pi*self.frequency)**2) , 1])])         
+        den = np.array([((1/self.std)**2 + (2*np.pi*self.frequency)**2 ), 2/self.std])
+        
+        return num, den
     
     
 class GaussianKernel(Kernel):

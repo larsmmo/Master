@@ -50,7 +50,7 @@ class Params(object):
             #self.data['spaceLocs'] = np.array([0,0,3], [0,0,6], [0,0,9], [0,0,12])
             #self.data['spaceLocs'] = np.arange(0, self.data['numLocs']).conj().T
 
-            self.data['samplingTime'] = 1.0 #(1.0 / 24 / 60)
+            self.data['samplingTime'] = 0.5 #(1.0 / 24 / 60)
             self.data['startTime'] = df.index[0]
             self.data['endTime'] = df.index[-1]
             
@@ -68,7 +68,7 @@ class Params(object):
             self.data['kernel']['time'] = {}
             self.data['kernel']['time']['type'] = 'exponential'    #'exponential', 'gaussian', 'periodic'
             self.data['kernel']['time']['scale'] = 0.3            # NOTE: to use gaussian kernel with GPKF
-            self.data['kernel']['time']['std'] = 1            # scale and std must be set to 1
+            self.data['kernel']['time']['std'] = 3            # scale and std must be set to 1
             self.data['kernel']['time']['frequency'] = 1
             
             if self.data['kernel']['time']['type'] == 'periodic':
