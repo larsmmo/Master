@@ -22,15 +22,15 @@ def plot_gp(mu, cov, X, X_train=None, Y_train=None, samples=[]):
     plt.legend()
 """
 
-def plot_gpkf(x_mesh, x, y, y_pred, y_cov, samples=[]):
+def plot_gpkf(x_mesh, x, y, y_pred, y_cov, samples=[], **kwargs):
     if y_cov.ndim > 1:
         uncertainty = 3 * np.sqrt(np.abs(np.diag(y_cov)))
     else:
         uncertainty = 3 * np.sqrt(np.abs(np.squeeze(y_cov)))
     #plt.figure(num = None, figsize=(16,12))
     
-    plt.plot(x, y, linestyle='none', marker='o', markersize=4, color='r', label='Measurements') # linestyle='none', marker='o',
-    plt.plot(x_mesh, y_pred, 'b-', label='Prediction')
+    plt.plot(x, y, markersize=6, color='r', label='Measurements', **kwargs) # linestyle='none', marker='o',
+    plt.plot(x_mesh, y_pred, label='Prediction')
     plt.fill_between(np.ravel(x_mesh), y_pred + uncertainty, y_pred - uncertainty, alpha=0.1, label='95% confidence interval')
     
     for i, sample in enumerate(samples):
@@ -40,24 +40,35 @@ def plot_gpkf(x_mesh, x, y, y_pred, y_cov, samples=[]):
     plt.ylabel('$f(x)$')
     plt.legend(loc='upper left')
     
-def plot_gpkf_space_time(params, F, posteriorMean, posteriorCov, predictedMean, predictedCov, timeIndex =-1, spaceIndexes = [], samples=[]):
-    plt.figure(num = None, figsize=(16,12))
+def plot_gpkf_space_time(params, F, posteriorMean, posteriorCov, predictedMean, predictedCov, timeIndex =-1, spaceIndex = 0, samples=[]):
+    plt.figure(num = None, figsize=(20,12))
     plt.subplot(2,2,1)
+    
     # Space
-    plot_gpkf(params.data['spaceLocsMeas'], params.data['spaceLocs'], F[:,timeIndex], posteriorMean[:,timeIndex], posteriorCov[:,:,timeIndex])
+    plot_gpkf(params.data['spaceLocsMeas'], params.data['spaceLocs'], F[:,timeIndex], posteriorMean[:,timeIndex], posteriorCov[:,:,timeIndex], **{'linestyle' : 'None', 'marker': 'x'})
     plt.title('GPKF space estimation')
     plt.subplot(2,2,2)
-    plot_gpkf(params.data['spaceLocsPred'], params.data['spaceLocs'], F[:,timeIndex], predictedMean[:,timeIndex], predictedCov[:,:,timeIndex])
+    plot_gpkf(params.data['spaceLocsPred'], params.data['spaceLocs'], F[:,timeIndex], predictedMean[:,timeIndex], predictedCov[:,:,timeIndex], **{'linestyle' : 'None', 'marker': 'x'})
     plt.title('GPKF space prediction')
     
     # Time
-    for i in spaceIndexes:
-        plt.subplot(2,2,3)
-        plot_gpkf(params.data['timeInstants'], params.data['timeInstants'], F[i,:], posteriorMean[i,:], posteriorCov[i,i,:])
+    i = np.where(params.data['spaceLocsPred'] == spaceIndex)[0][0]
+    plt.subplot(2,2,3)
+    j = np.where(params.data['spaceLocs'] == np.around(spaceIndex - np.mod(spaceIndex,3)))[0][0]
+    if j in params.data['spaceLocsMeasIdx']:
+        print(j)
+        print(params.data['spaceLocsMeas'].shape)
+        if j >= np.setdiff1d(np.arange(0, params.data['numLocs']) ,params.data['spaceLocsMeasIdx']):
+            print('re-indexing j')
+            plot_gpkf(params.data['timeInstants'], params.data['timeInstants'], F[j,:], posteriorMean[j-1,:], posteriorCov[j-1,j-1,:], **{'linestyle' : '--'})
+        else:
+            plot_gpkf(params.data['timeInstants'], params.data['timeInstants'], F[j,:], posteriorMean[j,:], posteriorCov[j,j,:], **{'linestyle' : '--'})
         plt.title('GPKF time estimation')
-        plt.subplot(2,2,4)
-        plot_gpkf(params.data['timeInstants'], params.data['timeInstants'], F[i,:], predictedMean[i,:], predictedCov[i,i,:])
-        plt.title('GPKF time prediction')
+    else:
+        print('GPKF not fitted for position ', i, ', No GPKF estimation plot for this position')
+    plt.subplot(2,2,4)
+    plot_gpkf(params.data['timeInstants'], params.data['timeInstants'], F[np.where(params.data['spaceLocs'] == np.around(spaceIndex - np.mod(spaceIndex,3)))[0][0],:], predictedMean[i,:], predictedCov[i,i,:], **{'linestyle' : '--'})
+    plt.title('GPKF time prediction')
 
 def plot_gp(x_mesh, x, y, y_pred, y_cov, samples=[]):
     uncertainty = 1.96 * np.sqrt(np.diag(y_cov))

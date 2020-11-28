@@ -11,74 +11,101 @@ from kernel import KernelFactory, Kernel, kernelFunction, kernelSampled
 from params import Params
 
 class Gpkf:
-    def __init__(self, params, y_train, normalize_y = True):
+    def __init__(self, params, y_train, kernel_time, kernel_space, normalize_y = True, n_restarts = 2):
         self.params = params # Todo: fix structure
         self.normalize_y = normalize_y
+        self.n_restarts = n_restarts
         
-        self.y_train_mean = np.nanmean(y_train, axis=0)
-        self.y_train_std = np.nanstd(y_train, axis=0)
-        self.y_train = (y_train.copy() - self.y_train_mean) / self.y_train_std if normalize_y else y_train.copy()
+        # standardize measurements
+        self.y_train_mean = np.nanmean(y_train)
+        self.y_train_std = np.nanstd(y_train)
+        #self.y_train = (y_train.copy() - self.y_train_mean) / self.y_train_std if normalize_y else y_train.copy()
+        self.y_train = (y_train.copy()-self.y_train_mean) if normalize_y else y_train.copy()
+        
+        # set up noise variance matrix
+        noiseVar = (params.data['noiseStd'] * np.abs(self.y_train))**2
+        noiseVar[np.isnan(noiseVar)] = np.inf
+        noiseVar[self.y_train==0] = params.data['noiseStd']**2
+        self.noiseVar = noiseVar
         
         # create time kernel
-        self.factory = KernelFactory()
-        self.kernel_time = self.factory.get_kernel(self.params.gpkf['kernel']['time']['type'], self.params.gpkf['kernel']['time'])
+        self.kernel_time = kernel_time
         
         # create space kernel
-        self.kernel_space = self.factory.get_kernel(self.params.gpkf['kernel']['space']['type'], self.params.gpkf['kernel']['space'])
+        self.kernel_space = kernel_space
         self.Ks_chol = np.linalg.cholesky(self.kernel_space.sampled(self.params.data['spaceLocsMeas'], self.params.data['spaceLocsMeas'])).conj().T
         
         # create DT state space model
-        self.a, self.c, self.v0, self.q = createDiscreteTimeSys(self.kernel_time.num, self.kernel_time.den, self.params.data['samplingTime'])
+        num, den = self.kernel_time.get_psd()
+        self.a, self.c, self.v0, self.q = createDiscreteTimeSys(num, den, self.params.data['samplingTime'])
+
         
-    def optimize(self, noiseVar, n_restarts):
+    def optimize(self):
+        # number of measured locations and time instants
+        numSpaceLocs,numTimeInstants = self.y_train.shape
         
+        I = np.eye(numSpaceLocs)
+        R = np.zeros((numSpaceLocs, numSpaceLocs, numTimeInstants))
+        for t in np.arange(0, numTimeInstants):
+            R[:,:,t] = np.diag(self.noiseVar[:,t]).copy()
+            
         def nll(theta):
+            
+            def ensure_positive_diag(K):
+                """
+                Makes sure the diagonal of K has positive elements. Negative values are replaces with 0.01
+                """
+                K_diag = np.diag(np.diag(K))
+                K = np.where(np.any(np.diag(K) < 0), np.where(K_diag < 0, 1e-3, K_diag), K)
+                return K
+            
             self.kernel_time.scale = theta[0]
             self.kernel_time.std = theta[1]
-            self.kernel_space.scale = theta[2]
-            self.kernel_space.std = theta[3]
+            self.kernel_time.frequency = theta[2]
+            self.kernel_space.scale = theta[3]
+            self.kernel_space.std = theta[4]
             
-            self.Ks_chol = np.linalg.cholesky(self.kernel_space.sampled(self.params.data['spaceLocsMeas'], self.params.data['spaceLocsMeas'])).conj().T
+            Kss = self.kernel_space.sampled(self.params.data['spaceLocsMeas'], self.params.data['spaceLocsMeas'])
+            self.Ks_chol = np.linalg.cholesky(ensure_positive_diag(Kss)).conj().T
             
-            self.a, self.c, self.v0, self.q = createDiscreteTimeSys(self.kernel_time.num, self.kernel_time.den, self.params.data['samplingTime'])
-            
-            # number of measured locations and time instants
-            numSpaceLocs,numTimeInstants = self.y_train.shape
+            num, den = self.kernel_time.get_psd()
+            self.a, self.c, self.v0, self.q = createDiscreteTimeSys(num, den, self.params.data['samplingTime'])
 
             # initialize quantities needed for kalman estimation
-            I = np.eye(numSpaceLocs)
             A = np.kron(I,self.a)
             C = self.Ks_chol @ np.kron(I,self.c)
             V0 = np.kron(I,self.v0)
             Q = np.kron(I,self.q)
-            R = np.zeros((numSpaceLocs, numSpaceLocs, numTimeInstants))
-            for t in np.arange(0, numTimeInstants):
-                R[:,:,t] = np.diag(noiseVar[:,t]).copy()
 
-            x,V,xp,Vp,logMarginal = kalmanEst(A,C,Q,V0,R)
+            x,V,xp,Vp,logMarginal = self.kalmanEst(A,C,Q,V0,R)
+            
+            print(logMarginal[0])
             
             return logMarginal[0]
         
-        res = minimize(nll, [self.kernel_time.scale, self.kernel_time.std, 
+        res = minimize(nll, [self.kernel_time.scale, self.kernel_time.std, self.kernel_time.frequency,
                              self.kernel_space.scale, self.kernel_space.std], 
-               bounds=((1e-5, 1e+5), (1e-5, 1e+5), (1e-5, 1e+5), (1e-5, 1e+5)),
+               bounds=((1e-5, 1e+5), (1e-5, 1e+5), (1e-5, 1e+5), (1e-5, 1e+5), (1e-5, 1e+5)),
                method='L-BFGS-B')
         
-        print('First run:', res.fun)
+        print('After first run:', res.fun)
         
-        for r in np.arange(0, n_restarts):
-            print('Optimizer restart:', r+1, ' of ',  n_restarts)
+        for r in np.arange(0, self.n_restarts):
+            print('Optimizer restart:', r+1, ' of ',  self.n_restarts)
             
             random_theta0 = loguniform.rvs(1e-5, 1e+5, size= 4)
             new_res = minimize(nll, random_theta0, 
-               bounds=((1e-5, 1e+5), (1e-5, 1e+5), (1e-5, 1e+5), (1e-5, 1e+5)),
+               bounds=((1e-5, 1e+5), (1e-5, 1e+5), (1e-5, 1e+5), (1e-5, 1e+5), (1e-5, 1e+5)),
                method='L-BFGS-B')
             if new_res.fun < res.fun:
                 res = new_res
             print(res.fun)
         
-        # Update kernel parameters with best results
-        self.kernel_time.scale, self.kernel_time.std, self.kernel_space.scale, self.kernel_space.std = res.x
+        # Update parameters with best results
+        self.kernel_time.scale, self.kernel_time.std, self.kernel_time.frequency, self.kernel_space.scale, self.kernel_space.std = res.x
+        
+        num, den = self.kernel_time.get_psd()
+        self.a, self.c, self.v0, self.q = createDiscreteTimeSys(num, den, self.params.data['samplingTime'])
         
         self.Ks_chol = np.linalg.cholesky(self.kernel_space.sampled(self.params.data['spaceLocsMeas'], self.params.data['spaceLocsMeas'])).conj().T
         
@@ -87,11 +114,11 @@ class Gpkf:
         print(res.fun)
                    
         
-    def estimation(self, noiseVar):
+    def estimation(self, prediction = True):
         """
         Returns the estimate of the GPKF algorithm
 
-        INPUT:  Measurements and corresponding noise variance matrix
+        INPUT:  prediction: decision variable for undoing normalization
         
         OUTPUT: PosteriorMean, posteriorCov: kalman estimates
                 logMarginal: value of the final marginal log-likelihood
@@ -107,10 +134,10 @@ class Gpkf:
         Q = np.kron(I,self.q)
         R = np.zeros((numSpaceLocs, numSpaceLocs, numTimeInstants))
         for t in np.arange(0, numTimeInstants):
-            R[:,:,t] = np.diag(noiseVar[:,t]).copy()
+            R[:,:,t] = np.diag(self.noiseVar[:,t]).copy()
         
         # compute kalman estimate
-        x,V,xp,Vp,logMarginal = self.kalmanEst(A,C,Q,V0,R)
+        x,V,xp,Vp,logMarginal = self.kalmanEst(A,C,Q,V0, R)
 
         # output function
         posteriorMean = np.matmul(C,x)
@@ -126,29 +153,34 @@ class Gpkf:
         for t in np.arange(0, numTimeInstants):
             
             # extract variance
-            #posteriorCov[:,:,t] = np.linalg.multi_dot([C, V[:,:,t], C.conj().T])
-            #posteriorCovPred[:,:,t] = np.linalg.multi_dot([C, Vp[:,:,t], C.conj().T])
             posteriorCov[:,:,t] = C @ V[:,:,t] @ C.conj().T
             posteriorCovPred[:,:,t] = C @ Vp[:,:,t] @ C.conj().T
             
             # compute output variance
             outputCov[:,:,t] = posteriorCov[:,:,t] + R[:,:,t]
             outputCovPred[:,:,t] = posteriorCovPred[:,:,t] + R[:,:,t]
+            
+        # Undo normalization
+        if self.normalize_y and not prediction:
+            #posteriorMean = self.y_train_std * posteriorMean + self.y_train_mean
+            posteriorMean = posteriorMean + self.y_train_mean
+            #posteriorCov = posteriorCov * self.y_train_std**2
         
         return posteriorMean, posteriorCov, logMarginal
 
 
-    def prediction(self, noiseVar):
+    def prediction(self):
         """
         Returns kalman prediction accoring to the GPKF algorithm
         
-        INPUT: data and Gpkf specific parameters, measurements and corresponding
-        noise variance matrix
+        INPUT: data and Gpkf specific parameters
         
         OUTPUT: predictedMean, predictedCov: kalman estimates
         """
 
-        postMean, postCov, logMarginal = self.estimation(noiseVar)
+        postMean, postCov, logMarginal = self.estimation()
+        
+        print(logMarginal)
 
         kernelSection = self.kernel_space.sampled(self.params.data['spaceLocsPred'], self.params.data['spaceLocsMeas'])
         kernelPrediction = self.kernel_space.sampled(self.params.data['spaceLocsPred'], self.params.data['spaceLocsPred'])
@@ -158,12 +190,18 @@ class Gpkf:
         numSpaceLocsPred = np.max(self.params.data['spaceLocsPred'].shape)
         numTimeInsts = np.max(self.params.data['timeInstants'].shape)
         predictedCov = np.zeros((numSpaceLocsPred, numSpaceLocsPred, numTimeInsts))
-        scale = self.params.gpkf['kernel']['time']['scale']
-        predictedMean = np.matmul(kernelSection, np.matmul(Ks_inv, postMean))
+        scale = self.kernel_time.scale
+        predictedMean = kernelSection @ (Ks_inv @ postMean)
                 
         for t in np.arange(0, numTimeInsts):
             W = Ks_inv @ (Ks - postCov[:,:,t].conj().T / scale) @ Ks_inv
-            predictedCov[:,:,t] = np.linalg.multi_dot([scale, (kernelPrediction - kernelSection @ W @ kernelSection.conj().T)])
+            predictedCov[:,:,t] = scale * (kernelPrediction - kernelSection @ W @ kernelSection.conj().T)
+            
+        # Undo normalization
+        if self.normalize_y:
+            #predictedMean = self.y_train_std * predictedMean + self.y_train_mean
+            predictedMean = predictedMean + self.y_train_mean
+            #predictedCov = predictedCov * self.y_train_std**2
 
         return predictedMean, predictedCov
     
@@ -172,8 +210,7 @@ class Gpkf:
         Returns the prediction and corrections computed by means of standard
         iterative kalman filtering procedure
 
-        INPUT:  (A,C,Q,V0) model matrices, meas vector of measuremenst, noiseVar
-                corresponding noise variance matrix
+        INPUT:  (A,C,Q,V0) model matrices, noise variance
 
         OUTPUT: x,V,xp,Vp estimates and predictions with corresponding covariance.
                 logMarginal marginal log-likelihood
@@ -209,25 +246,28 @@ class Gpkf:
 
             xt = xpt + correction
 
-            Vt = np.linalg.multi_dot([(I - np.matmul(K,Ct)), Vpt ,(I - np.matmul(K,Ct)).conj().T]) + np.linalg.multi_dot([K, Rt, K.conj().T])
+            Vt = (I - np.matmul(K,Ct)) @ Vpt  @ (I - np.matmul(K,Ct)).conj().T + (K @ Rt @ K.conj().T)
 
             # save values
             xp[:,t] = xpt[:,0]
             Vp[:,:,t] = Vpt[:,:]
             x[:,t] = xt[:,0]
             V[:,:,t] = Vt[:,:]
-
+            
             # computations for the marginal likelihood
             l1 = np.sum(np.log(np.linalg.eig(innovVar)[0]))
-            l2 = np.matmul(innovation.conj().T, np.linalg.solve(innovVar, innovation))
+            l2 = np.matmul(innovation.conj().T, np.linalg.lstsq(innovVar, innovation)[0])
 
             logMarginal = logMarginal +  0.5*(np.max(innovation.shape) * np.log(2*np.pi) + l1 + l2)
-
+        
         return x, V, xp, Vp, logMarginal[0]
     
     def draw_samples(sample_range, n_samples):
         mu = np.zeros(sample_range.shape)
-        cov = self.kernel
+        #cov = self.kernel
+        
+    def __str__(self):
+        return 'Time kernel: '+ str(self.kernel_time) + '\n' + 'Space kernel: ' + str(self.kernel_space)
 
 def createDiscreteTimeSys(num_coeff, den_coeff, Ts):
     """
@@ -273,64 +313,3 @@ def createDiscreteTimeSys(num_coeff, den_coeff, Ts):
             Q = Q + t * expm(F * n) @ (G @G.conj().T) @ (expm(F * n)).conj().T
     
     return A, C, V, Q
-
-def kalmanEst(A, C, Q, V0, meas, noiseVar, optimize='False'):
-    """
-    Returns the prediction and corrections computed by means of standard
-    iterative kalman filtering procedure
-
-    INPUT:  (A,C,Q,V0) model matrices, meas vector of measuremenst, noiseVar
-            corresponding noise variance matrix
-
-    OUTPUT: x,V,xp,Vp estimates and predictions with corresponding covariance.
-            logMarginal marginal log-likelihood
-    """
-    numTimeInstants = meas.shape[1]
-    stateDim = A.shape[0]
-    I = np.eye(stateDim)
-    times = np.zeros((numTimeInstants,1))
-    logMarginal = 0
-
-    # initialization
-    xt = np.zeros((stateDim,1))
-    Vt = V0
-    xp = np.zeros((stateDim,numTimeInstants))
-    Vp = np.zeros((stateDim,stateDim,numTimeInstants))
-    x = np.zeros((stateDim,numTimeInstants))
-    V = np.zeros((stateDim,stateDim,numTimeInstants))
-
-    for t in np.arange(0, numTimeInstants):
-        # prediction
-        xpt = np.matmul(A,xt)
-        Vpt = A @ Vt @ A.conj().T + Q
-
-        # correction
-        notNanPos = np.logical_not(np.isnan(meas[:,t]))
-        Ct = C[notNanPos,:]
-        Rt = noiseVar[:,:,t][np.ix_(notNanPos, notNanPos)]
-
-        innovation = meas[:,t][np.newaxis].T[np.ix_(notNanPos)] -  (Ct @ xpt)
-        innovVar = Ct @ Vpt @ Ct.conj().T + Rt
-        K = np.linalg.solve(innovVar.conj().T,(np.matmul(Vpt, Ct.conj().T)).conj().T).conj().T   # kalman gain
-        correction = np.matmul(K, innovation)
-        
-        xt = xpt + correction
-
-        Vt = np.linalg.multi_dot([(I - np.matmul(K,Ct)), Vpt ,(I - np.matmul(K,Ct)).conj().T]) + np.linalg.multi_dot([K, Rt, K.conj().T])
-
-        # save values
-        xp[:,t] = xpt[:,0]
-        Vp[:,:,t] = Vpt[:,:]
-        x[:,t] = xt[:,0]
-        V[:,:,t] = Vt[:,:]
-          
-        # computations for the marginal likelihood
-        l1 = np.sum(np.log(np.linalg.eig(innovVar)[0]))
-        l2 = np.matmul(innovation.conj().T, np.linalg.solve(innovVar, innovation))
-
-        logMarginal = logMarginal +  0.5*(np.max(innovation.shape) * np.log(2*np.pi) + l1 + l2)
-    
-    if optimize == True:
-        return logMarginal[0]
-    
-    return x, V, xp, Vp, logMarginal[0]

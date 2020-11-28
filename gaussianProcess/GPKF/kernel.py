@@ -1,5 +1,6 @@
 import numpy as np
 from numpy.linalg import multi_dot
+from sklearn.gaussian_process.kernels import Matern
 
 from abc import ABC, abstractmethod
 
@@ -14,6 +15,8 @@ class KernelFactory(object):
             return PeriodicKernel(params)
         elif type =='gaussian':
             return GaussianKernel(params)
+        elif type =='matern32':
+            return Matern32Kernel(params)
         else:
             raise NotImplementedError("Unknown type of kernel. Might not be implemented")
 
@@ -81,6 +84,24 @@ class Kernel(ABC):
         K = np.kron(Kt,Ks)
 
         return K
+    
+    def __str__(self):
+        return str(vars(self))
+    
+class Matern32Kernel(Kernel):
+    def __init__(self, params):
+        super().__init__(params)
+        
+    def kernelFunction(self, x1, x2):
+        print('Matern func not implemented yet. Only PSD')
+        return None # No need to implement yet
+    
+    def get_psd(self):
+        lam = np.sqrt(3.0)/self.scale
+        num = np.array([12.0 * 3.0**0.5/ self.scale **3.0 * self.std])
+        den = np.array([lam ** 2, 2*lam])
+        
+        return num, den
     
 class ExponentialKernel(Kernel):
     def __init__(self, params):

@@ -1,7 +1,7 @@
 import numpy as np
 
 class Params(object):
-    def __init__(self, df, dataset_name):
+    def __init__(self, df, locations, dataset_name):
         self.dataset = dataset_name
         self.optimizer_restarts = 2
         
@@ -46,11 +46,14 @@ class Params(object):
             self.data['numLocs'] = df.columns.size
 
             self.data['spaceLocsIdx'] = np.arange(0,self.data['numLocs']).conj().T
-            self.data['spaceLocs'] = np.array([3,6,9,12]).conj().T
+                    
+            self.data['spaceLocs'] = locations
+            
+            #self.data['spaceLocs'] = np.array([3,6,9,12]).conj().T
             #self.data['spaceLocs'] = np.array([0,0,3], [0,0,6], [0,0,9], [0,0,12])
             #self.data['spaceLocs'] = np.arange(0, self.data['numLocs']).conj().T
 
-            self.data['samplingTime'] = 0.5 #(1.0 / 24 / 60)
+            self.data['samplingTime'] = 1.0 #(1.0 / 24 / 60)
             self.data['startTime'] = df.index[0]
             self.data['endTime'] = df.index[-1]
             
@@ -61,19 +64,19 @@ class Params(object):
             self.data['kernel'] = {}
 
             self.data['kernel']['space'] = {}
-            self.data['kernel']['space']['type'] = 'exponential'
-            self.data['kernel']['space']['scale'] = 0.25
-            self.data['kernel']['space']['std'] = 1
+            self.data['kernel']['space']['type'] = 'gaussian'
+            self.data['kernel']['space']['scale'] = 0.001
+            self.data['kernel']['space']['std'] = 2
 
             self.data['kernel']['time'] = {}
             self.data['kernel']['time']['type'] = 'exponential'    #'exponential', 'gaussian', 'periodic'
-            self.data['kernel']['time']['scale'] = 0.3            # NOTE: to use gaussian kernel with GPKF
-            self.data['kernel']['time']['std'] = 3            # scale and std must be set to 1
+            self.data['kernel']['time']['scale'] = 10          # NOTE: to use gaussian kernel with GPKF
+            self.data['kernel']['time']['std'] = 2            # scale and std must be set to 1
             self.data['kernel']['time']['frequency'] = 1
             
             if self.data['kernel']['time']['type'] == 'periodic':
-                self.data['kernel']['time']['scale'] = 0.394         
-                self.data['kernel']['time']['std'] = 1              
+                self.data['kernel']['time']['scale'] = 0.1        
+                self.data['kernel']['time']['std'] = 2              
                 self.data['kernel']['time']['frequency'] = 750
 
             # NONPERAMETRIC KERNEL parameter
@@ -84,13 +87,23 @@ class Params(object):
             self.gpkf['kernel'] = self.data['kernel']
 
         # Compute additional (common) parameters
-        self.data['spaceLocsMeasIdx'] = np.sort(np.random.choice(self.data['spaceLocsIdx'], int(np.around(0.8*self.data['numLocs'])), replace=False))
+        self.data['spaceLocsMeasIdx'] = np.sort(np.random.choice(self.data['spaceLocsIdx'], int(np.around(1.0*self.data['numLocs'])), replace=False))
         self.data['spaceLocsMeas'] = self.data['spaceLocs'][self.data['spaceLocsMeasIdx']]
-        self.data['spaceLocsPredIdx'] = np.arange(0, 52) #np.setdiff1d(self.data['spaceLocsIdx'], self.data['spaceLocsMeasIdx']) 
-        self.data['spaceLocsPred'] = np.linspace(0 , 13, 52) #self.data['spaceLocs'][self.data['spaceLocsPredIdx']] 
+        
+        # Define prediction mesh
+        xx, yy, zz = np.meshgrid(np.arange(0,66,6), 3, np.arange(0,66,6))
+        np.column_stack([xx.flatten(), yy.flatten(), zz.flatten()])
+        self.data['spaceLocsPredIdx'] = np.arange(0, 11*11)
+        self.data['spaceLocsPred'] = np.column_stack([xx.flatten(), yy.flatten(), zz.flatten()])
+        
+        #self.data['spaceLocsPredIdx'] = np.arange(0, 53) #np.setdiff1d(self.data['spaceLocsIdx'], self.data['spaceLocsMeasIdx'])
+        #self.data['spaceLocsPred'] = np.linspace(0,13,53) #self.data['spaceLocs'][self.data['spaceLocsPredIdx']]
+        
+        
 
         #self.data['timeInstants'] = np.arange(self.data['startTime'], self.data['endTime'] + self.data['samplingTime'], self.data['samplingTime']).conj().T
 
+"""
 
         if self.gpkf['kernel']['time']['type'] == 'exponential':
             self.gpkf['kernel']['time']['num'] = np.array([np.sqrt(2*self.gpkf['kernel']['time']['scale'] / self.gpkf['kernel']['time']['std'])])
@@ -104,3 +117,5 @@ class Params(object):
         #elif self.gpkf['kernel']['time']['type'] == 'gaussian':
         else:
             print('Not admissible kernel type')
+            
+"""
