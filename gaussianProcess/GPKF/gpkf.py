@@ -169,7 +169,7 @@ class Gpkf:
         return posteriorMean, posteriorCov, logMarginal
 
 
-    def prediction(self):
+    def prediction(self, spaceLocsPred):
         """
         Returns kalman prediction accoring to the GPKF algorithm
         
@@ -182,12 +182,12 @@ class Gpkf:
         
         print(logMarginal)
 
-        kernelSection = self.kernel_space.sampled(self.params.data['spaceLocsPred'], self.params.data['spaceLocsMeas'])
-        kernelPrediction = self.kernel_space.sampled(self.params.data['spaceLocsPred'], self.params.data['spaceLocsPred'])
+        kernelSection = self.kernel_space.sampled(spaceLocsPred, self.params.data['spaceLocsMeas'])
+        kernelPrediction = self.kernel_space.sampled(spaceLocsPred, spaceLocsPred)
         Ks = self.kernel_space.sampled(self.params.data['spaceLocsMeas'], self.params.data['spaceLocsMeas'])
         Ks_inv = np.linalg.inv(Ks)
 
-        numSpaceLocsPred = np.max(self.params.data['spaceLocsPred'].shape)
+        numSpaceLocsPred = np.max(spaceLocsPred.shape)
         numTimeInsts = np.max(self.params.data['timeInstants'].shape)
         predictedCov = np.zeros((numSpaceLocsPred, numSpaceLocsPred, numTimeInsts))
         scale = self.kernel_time.scale
@@ -286,7 +286,7 @@ def createDiscreteTimeSys(num_coeff, den_coeff, Ts):
     if stateDim ==1:
         F = -den_coeff       # state matrix
         A = np.exp(F * Ts)   # Discretization
-        G = np.array([1])
+        G = np.array([1])    #L
     else:
         F = np.diag(np.ones((1,stateDim-1)).flatten(),1).copy()
         F[stateDim-1, :] = -den_coeff

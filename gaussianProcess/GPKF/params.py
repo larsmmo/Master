@@ -92,7 +92,6 @@ class Params(object):
         
         # Define prediction mesh
         xx, yy, zz = np.meshgrid(np.arange(0,66,6), 3, np.arange(0,66,6))
-        np.column_stack([xx.flatten(), yy.flatten(), zz.flatten()])
         self.data['spaceLocsPredIdx'] = np.arange(0, 11*11)
         self.data['spaceLocsPred'] = np.column_stack([xx.flatten(), yy.flatten(), zz.flatten()])
         
