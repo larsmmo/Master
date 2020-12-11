@@ -1,5 +1,5 @@
 import numpy as np
-from kernel import kernelSpaceTimeSampled
+from kernel import Kernel
 
 
 def generateSyntheticData(param):
