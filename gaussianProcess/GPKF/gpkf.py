@@ -39,6 +39,20 @@ class Gpkf:
         num, den = self.kernel_time.get_psd()
         self.a, self.c, self.v0, self.q = createDiscreteTimeSys(num, den, self.params.data['samplingTime'])
     
+    def set_params(self, **parameters):
+        """
+        Function for setting parameters. Required for gridSearchCV (sklearn)
+        """
+        for parameter, value in parameters.items():
+            setattr(self, parameter, value)
+        return self
+    
+    def get_params(self,deep=True):
+        """
+        Function for getting parameters. Required for gridSearchCV (sklearn)
+        """
+        
+    
     def fit(self, X, y):
         numSpaceLocs, numTimeInstants = y.shape
         
