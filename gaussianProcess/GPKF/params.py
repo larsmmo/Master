@@ -12,7 +12,7 @@ class Params(object):
             self.data['spaceLocsIdx'] = np.arange(0,self.data['numLocs']).conj().T
             self.data['spaceLocs'] = np.arange(0, self.data['numLocs']).conj().T
 
-            self.data['samplingTime'] = 0.5
+            self.data['samplingTime'] = 1.0
             self.data['startTime'] = 0
             self.data['endTime'] = 10
             
@@ -59,7 +59,7 @@ class Params(object):
             
             self.data['timeInstants'] = df.index.T
 
-            self.data['noiseStd'] = 0.05
+            self.data['noiseStd'] = 0.5
 
             self.data['kernel'] = {}
 

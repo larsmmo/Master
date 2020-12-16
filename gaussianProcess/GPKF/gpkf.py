@@ -7,7 +7,7 @@ from scipy.stats import loguniform
 
 import sklearn.gaussian_process.kernels
 
-from kernel import KernelFactory, Kernel
+from kernel import Kernel
 from params import Params
 
 class Gpkf:
@@ -23,7 +23,7 @@ class Gpkf:
         self.y_train = (y_train.copy()-self.y_train_mean) if normalize_y else y_train.copy()
         
         # set up noise variance matrix
-        noiseVar = (params.data['noiseStd'] * np.abs(self.y_train))**2
+        noiseVar = (params.data['noiseStd'] * np.ones(self.y_train.shape))**2 #(params.data['noiseStd'] * np.abs(self.y_train))**2
         noiseVar[np.isnan(noiseVar)] = np.inf
         noiseVar[self.y_train==0] = params.data['noiseStd']**2
         self.noiseVar = noiseVar
@@ -33,11 +33,11 @@ class Gpkf:
         
         # create space kernel
         self.kernel_space = kernel_space
-        self.Ks_chol = np.linalg.cholesky(self.kernel_space.sampled(self.params.data['spaceLocsMeas'], self.params.data['spaceLocsMeas'])).conj().T
+        #self.Ks_chol = np.linalg.cholesky(self.kernel_space.sampled(self.params.data['spaceLocsMeas'], self.params.data['spaceLocsMeas'])).conj().T
+        self.Ks_chol = np.linalg.cholesky(self.kernel_space.sample(self.params.data['spaceLocsMeas'], self.params.data['spaceLocsMeas'])).conj().T
         
         # create DT state space model
-        num, den = self.kernel_time.get_psd()
-        self.a, self.c, self.v0, self.q = createDiscreteTimeSys(num, den, self.params.data['samplingTime'])
+        self.a, self.c, self.v0, self.q = createDiscreteTimeSys(self.kernel_time, self.params.data['samplingTime'])
     
     def set_params(self, **parameters):
         """
@@ -80,18 +80,17 @@ class Gpkf:
                 K = np.where(np.any(np.diag(K) < 0), np.where(K_diag < 0, 1e-3, K_diag), K)
                 return K
             
-            self.kernel_time.scale = theta[0]
-            self.kernel_time.std = theta[1]
-            self.kernel_time.frequency = theta[2]
-            self.kernel_space.scale = theta[3]
-            self.kernel_space.std = theta[4]
+            self.kernel_time.lengthscale = theta[0]
+            self.kernel_time.variance = theta[1]
+            self.kernel_space.lengthscale = theta[2]
+            self.kernel_space.variance = theta[3]
             
-            Kss = self.kernel_space.sampled(self.params.data['spaceLocsMeas'], self.params.data['spaceLocsMeas'])
+            #Kss = self.kernel_space.sampled(self.params.data['spaceLocsMeas'], self.params.data['spaceLocsMeas'])
+            Kss = self.kernel_space.sample(self.params.data['spaceLocsMeas'], self.params.data['spaceLocsMeas'])
             Kss[np.diag_indices_from(Kss)] += 1e-3 # Add epsilon to diagonal for numerical stability (positive definite requred for cholesky)
             self.Ks_chol = np.linalg.cholesky(Kss).conj().T
-            
-            num, den = self.kernel_time.get_psd()
-            self.a, self.c, self.v0, self.q = createDiscreteTimeSys(num, den, self.params.data['samplingTime'])
+
+            self.a, self.c, self.v0, self.q = createDiscreteTimeSys(self.kernel_time, self.params.data['samplingTime'])
 
             # initialize quantities needed for kalman estimation
             A = np.kron(I,self.a)
@@ -105,9 +104,9 @@ class Gpkf:
             
             return logMarginal[0]
         
-        res = minimize(nll, [self.kernel_time.scale, self.kernel_time.std, self.kernel_time.frequency,
-                             self.kernel_space.scale, self.kernel_space.std], 
-               bounds=((1e-5, 1e+5), (1e-5, 1e+5), (1e-5, 1e+5), (1e-5, 1e+5), (1e-5, 1e+5)),
+        res = minimize(nll, [self.kernel_time.lengthscale, self.kernel_time.variance,
+                             self.kernel_space.lengthscale, self.kernel_space.variance], 
+               bounds=((1e-5, 1e+5), (1e-5, 1e+5), (1e-5, 1e+5), (1e-5, 1e+5)),
                method='L-BFGS-B')
         
         print('After first run:', res.fun)
@@ -115,20 +114,20 @@ class Gpkf:
         for r in np.arange(0, self.n_restarts):
             print('Optimizer restart:', r+1, ' of ',  self.n_restarts)
             
-            random_theta0 = loguniform.rvs(1e-5, 1e+5, size= 5)
+            random_theta0 = loguniform.rvs(1e-5, 1e+5, size= 4)
             new_res = minimize(nll, random_theta0, 
-               bounds=((1e-5, 1e+5), (1e-5, 1e+5), (1e-5, 1e+5), (1e-5, 1e+5), (1e-5, 1e+5)),
+               bounds=((1e-5, 1e+5), (1e-5, 1e+5), (1e-5, 1e+5), (1e-5, 1e+5)),
                method='L-BFGS-B')
             if new_res.fun < res.fun:
                 res = new_res
         
         # Update parameters with best results
-        self.kernel_time.scale, self.kernel_time.std, self.kernel_time.frequency, self.kernel_space.scale, self.kernel_space.std = res.x
+        self.kernel_time.lengthscale, self.kernel_time.variance, self.kernel_space.lengthscale, self.kernel_space.variance = res.x
         
-        num, den = self.kernel_time.get_psd()
-        self.a, self.c, self.v0, self.q = createDiscreteTimeSys(num, den, self.params.data['samplingTime'])
+        self.a, self.c, self.v0, self.q = createDiscreteTimeSys(self.kernel_time, self.params.data['samplingTime'])
         
-        self.Ks_chol = np.linalg.cholesky(self.kernel_space.sampled(self.params.data['spaceLocsMeas'], self.params.data['spaceLocsMeas'])).conj().T
+        #self.Ks_chol = np.linalg.cholesky(self.kernel_space.sampled(self.params.data['spaceLocsMeas'], self.params.data['spaceLocsMeas'])).conj().T
+        self.Ks_chol = np.linalg.cholesky(self.kernel_space.sample(self.params.data['spaceLocsMeas'], self.params.data['spaceLocsMeas'])).conj().T
         
         print('Best hyperparameters and marginal log value')
         print(res.x)
@@ -203,15 +202,15 @@ class Gpkf:
         
         print(logMarginal)
 
-        kernelSection = self.kernel_space.sampled(spaceLocsPred, self.params.data['spaceLocsMeas'])
-        kernelPrediction = self.kernel_space.sampled(spaceLocsPred, spaceLocsPred)
-        Ks = self.kernel_space.sampled(self.params.data['spaceLocsMeas'], self.params.data['spaceLocsMeas'])
+        kernelSection = self.kernel_space.sample(spaceLocsPred, self.params.data['spaceLocsMeas'])
+        kernelPrediction = self.kernel_space.sample(spaceLocsPred, spaceLocsPred)
+        Ks = self.kernel_space.sample(self.params.data['spaceLocsMeas'], self.params.data['spaceLocsMeas'])
         Ks_inv = np.linalg.inv(Ks)
 
         numSpaceLocsPred = np.max(spaceLocsPred.shape)
         numTimeInsts = np.max(self.params.data['timeInstants'].shape)
         predictedCov = np.zeros((numSpaceLocsPred, numSpaceLocsPred, numTimeInsts))
-        scale = self.kernel_time.scale
+        scale = self.kernel_time.lengthscale
         predictedMean = kernelSection @ (Ks_inv @ postMean)
                 
         for t in np.arange(0, numTimeInsts):
@@ -282,20 +281,16 @@ class Gpkf:
             logMarginal = logMarginal +  0.5*(np.max(innovation.shape) * np.log(2*np.pi) + l1 + l2)
         
         return x, V, xp, Vp, logMarginal[0]
-    
-    def draw_samples(sample_range, n_samples):
-        mu = np.zeros(sample_range.shape)
-        #cov = self.kernel
         
     def __str__(self):
-        return 'Time kernel: '+ str(self.kernel_time) + '\n' + 'Space kernel: ' + str(self.kernel_space)
+        return 'Time kernel: \n'+ str(self.kernel_time) + '\n' + 'Space kernel: \n' + str(self.kernel_space)
 
-def createDiscreteTimeSys(num_coeff, den_coeff, Ts):
+def createDiscreteTimeSys(kernel, Ts):
     """
     builds the discrete time ss system in canonical form, given the numerator and
     denominator coefficients of the companion form
 
-    INPUT:  numerator, denominator coefficients and sampling time Ts for the
+    INPUT:  Temporal kernel and sampling time Ts for the
             discretization
 
     OUTPUT: matrix A,C,V,Q: state matrix, output matrix,
@@ -303,6 +298,7 @@ def createDiscreteTimeSys(num_coeff, den_coeff, Ts):
             and measurement variance matrix
     """
     # state dimension
+    num_coeff, den_coeff = kernel.get_psd()
     stateDim  = np.max(den_coeff.shape)
     if stateDim ==1:
         F = -den_coeff       # state matrix
@@ -311,8 +307,8 @@ def createDiscreteTimeSys(num_coeff, den_coeff, Ts):
     else:
         F = np.diag(np.ones((1,stateDim-1)).flatten(),1).copy()
         F[stateDim-1, :] = -den_coeff
-        A = expm(F * Ts)  # state matrix
-        G = np.vstack([np.zeros((stateDim-1,1)),1]) # input matrix
+        A = kernel.get_state_transition(Ts) #expm(F * Ts)  # state matrix
+        G = np.append(np.zeros((stateDim-1,1)),1.0)[np.newaxis].T # input matrix
     
     # output matrix
     C = np.zeros((1,stateDim))
@@ -327,10 +323,12 @@ def createDiscreteTimeSys(num_coeff, den_coeff, Ts):
     t = Ts/Ns
     if stateDim == 1:
         for n in np.arange(t, Ts+t, step=t):
-            Q = Q + t * np.exp(np.dot(F,n)) * np.dot(G,G.conj().T) * np.exp(np.dot(F,n)).conj().T
+            Q = Q + t * np.exp(F * n) * np.dot(G,G.conj().T) * np.exp(F * n).conj().T
     else:
         for n in np.arange(t, Ts+t, step=t):
             #Q = Q + np.linalg.multi_dot([t, expm(np.dot(F,n)), np.dot(G,G.conj().T), expm(np.dot(F,n)).conj().T])
-            Q = Q + t * expm(F * n) @ (G @G.conj().T) @ (expm(F * n)).conj().T
+            #Q = Q + t * expm(F * n) @ (G @G.conj().T) @ (expm(F * n)).conj().T
+            Fn = kernel.get_state_transition(n)
+            Q = Q + t * Fn @ (G @G.conj().T) @ Fn.conj().T
     
     return A, C, V, Q

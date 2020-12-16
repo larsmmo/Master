@@ -1,85 +1,51 @@
 import numpy as np
 from numpy.linalg import multi_dot
 from sklearn.gaussian_process.kernels import Matern
+import GPy
 
 from abc import ABC, abstractmethod
-
-class KernelFactory(object):
-    """
-    Kernel factory instantiating the desired class
-    """
-    def get_kernel(self, type, params):
-        if type == 'exponential':
-            return ExponentialKernel(params)
-        elif type == 'periodic':
-            return PeriodicKernel(params)
-        elif type =='gaussian':
-            return GaussianKernel(params)
-        elif type =='matern32':
-            return Matern32Kernel(params)
-        else:
-            raise NotImplementedError("Unknown type of kernel. Might not be implemented")
 
 class Kernel(ABC):
     """
     Abstract baseclass for kernels.
     """
-    def __init__(self, params):
-        for key, value in params.items():
-            setattr(self, key, value)
+    def __init__(self, kernel):
+        self.kernel = kernel
+        self.lengthscale = self.kernel.lengthscale[0]
+        self.variance = self.kernel.variance[0]
+            
+    def get_params(self, deep = True):
+        """
+        Get parameters of kernel. If deep = True, also return parameters for contained kernels
+        
+        Output: Dict of parameter names mapped to their values
+        """
+        #params = dict()
+        
+    def set_params(self, **parameters):
+        for parameter, value in parameters.items():
+            setattr(self, parameter, value)
+            setattr(self.kernel, parameter, value)
         
     @abstractmethod
     def kernelFunction(self):
          raise NotImplementedError("No default kernel. Please specify a type (exponential, periodic etc.)")
-            
+    
+    @abstractmethod
     def get_psd(self):
         raise NotImplementedError("No default kernel. Please specify a type (exponential, periodic etc.)")
-
-    def sampled(self, input_set_1, input_set_2):
-        """
-        kernelSampled returns sampled kernel
-           K = kernelSampled(kernel_function, *args) returns the kernel 
-           (given as input function) sampled across the desired input set
-           Consistency among kernel function and input sets must be priorly ensure
-           by the user
-        """
-
-        # cardinalities of input sets
-        n_input1 = input_set_1.shape[0]
-        n_input2 = input_set_2.shape[0]
-
-        # initialize
-        K = np.zeros((n_input1, n_input2))
-
-        for i in np.arange(0, n_input1):
-            for j in np.arange(0, n_input2):
-                #todo: fix [i,:]
-                K[i,j] = self.kernelFunction(input_set_1[i] , input_set_2[j])
         
-        return K
-
-    def spaceTimeSampled(self, kernel_space, kernel_time, space_locs1, space_locs2, time_instants1, time_instants2, param):
-        """
-        K = kernelSpaceTimeSampled(space_locs, time_instants, kernel_param) build the 
-        space and time kernels, sample them in the desired set of input 
-        locations and returns the kernel (given as input function) sampled 
-        across the desired input set.
-        Consistency among kernel function and input sets must be priorly ensure
-        by the user
-
-        This way of sampling the space-time kernel is just one possibility. It
-        would be possible to directly use the function kernelSampled by properly
-        specifying the input sets. However, this implementation is more efficient
-        """
-        # sampled kernels
-        Ks = kernel_space.sampled(space_locs1, space_locs2)
-        Kt = kernel_time.sampled(time_instants1, time_instants2)
-
-        # overall space-time kernel
-        K = np.kron(Kt,Ks)
-
-        return K
+    @abstractmethod
+    def get_state_transition(self):
+        raise NotImplementedError("No default kernel. Please specify a type (exponential, periodic etc.)")
     
+    def sample(self, X1, X2):
+        """
+           Returns the kernel sampled across the desired input set
+        """
+        dist = self.kernel._scaled_dist(X1, X2)
+        return self.kernel.K_of_r(dist)
+        
     def __str__(self):
         return str(vars(self))
     
@@ -92,22 +58,26 @@ class Matern32Kernel(Kernel):
         return None # No need to implement yet
     
     def get_psd(self):
-        lam = np.sqrt(3.0)/self.scale
-        num = np.array([np.sqrt(12.0 * 3.0**0.5/ self.scale **3.0 * self.std)])
+        lam = np.sqrt(3.0)/self.lengthscale
+        num = np.array([np.sqrt(12.0 * 3.0**0.5/ self.lengthscale **3.0 * self.variance)])
         den = np.array([lam ** 2, 2*lam])
         
         return num, den
+    
+    def get_state_transition(self, Ts):
+        lam = np.sqrt(3.0)/self.lengthscale
+        return np.exp(-Ts * lam) * (Ts * np.array([[lam, 1.0], [-lam**2.0, -lam]]) + np.eye(2))
     
 class ExponentialKernel(Kernel):
     def __init__(self, params):
         super().__init__(params)
         
     def kernelFunction(self, x1, x2):
-        return self.scale * np.exp(-np.linalg.norm(x1-x2) / self.std)
+        return self.lengthscale * np.exp(-np.linalg.norm(x1-x2) / self.variance)
     
     def get_psd(self):
-        num = np.array([np.sqrt(2*self.scale / self.std)])
-        den = np.array([1/self.std])
+        num = np.array([np.sqrt(2*self.lengthscale / self.variance)])
+        den = np.array([1/self.variance])
         
         return num, den
     
@@ -115,13 +85,14 @@ class ExponentialKernel(Kernel):
 class PeriodicKernel(Kernel):
     def __init__(self, params):
         super().__init__(params)
+        self.frequency = self.kernel.period[0]
         
     def kernelFunction(x1,x2):
-        return self.scale * np.cos(2*pi*self.frequency * np.linalg.norm(x1-x2)) * np.exp(-np.linalg.norm(x1-x2)/self.std)
+        return self.lengthscale * np.cos(2*pi*self.frequency * np.linalg.norm(x1-x2)) * np.exp(-np.linalg.norm(x1-x2)/self.variance)
     
     def get_psd(self):
-        num = np.array([np.sqrt(2*self.scale / self.std) * np.array([np.sqrt((1/self.std)**2 + (2*np.pi*self.frequency)**2) , 1])])         
-        den = np.array([((1/self.std)**2 + (2*np.pi*self.frequency)**2 ), 2/self.std])
+        num = np.array([np.sqrt(2*self.lengthscale / self.variance) * np.array([np.sqrt((1/self.variance)**2 + (2*np.pi*self.frequency)**2) , 1])])         
+        den = np.array([((1/self.variance)**2 + (2*np.pi*self.frequency)**2 ), 2/self.variance])
         
         return num, den
     
@@ -131,7 +102,13 @@ class GaussianKernel(Kernel):
         super().__init__(params)
         
     def kernelFunction(self, x1, x2):
-        return self.scale * (np.exp(-np.linalg.norm(x1-x2)**2 / (2*self.std**2)))
+        return self.lengthscale * (np.exp(-np.linalg.norm(x1-x2)**2 / (2*self.variance**2)))
+    
+    def get_psd(self):
+        return 0
+    
+    def get_state_transition(self, Ts):
+        return 0
 
 """
 class SeparableKernel(Kernel):
@@ -140,8 +117,8 @@ class SeparableKernel(Kernel):
         #self.ks = 
         
     def kernelFunction(self, x1, x2):
-        ks = kernelFunction(params['space']['type'], params['space']['scale'], params['space']['std'])
-        kt = kernelFunction(params['time']['type'], params['time']['scale'], params['time']['std'])
+        ks = kernelFunction(params['space']['type'], params['space']['scale'], params['space']['variance'])
+        kt = kernelFunction(params['time']['type'], params['time']['scale'], params['time']['variance'])
         
         return np.matmul(kt(x1[0],x2[0]), ks(x1[1:end],x2[1:end]))
 """  
