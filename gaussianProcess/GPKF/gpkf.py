@@ -37,7 +37,7 @@ class Gpkf:
         self.Ks_chol = np.linalg.cholesky(self.kernel_space.sample(self.params.data['spaceLocsMeas'], self.params.data['spaceLocsMeas'])).conj().T
         
         # create DT state space model
-        self.a, self.c, self.v0, self.q = createDiscreteTimeSys(self.kernel_time, self.params.data['samplingTime'])
+        self.a, self.c, self.v0, self.q = self.kernel_time.createDiscreteTimeSys(self.params.data['samplingTime'])
     
     def set_params(self, **parameters):
         """
@@ -45,6 +45,7 @@ class Gpkf:
         """
         for parameter, value in parameters.items():
             setattr(self, parameter, value)
+            
         return self
     
     def get_params(self,deep=True):
@@ -62,13 +63,6 @@ class Gpkf:
             R[:,:,t] = np.diag(self.noiseVar[:,t]).copy()
         
     def optimize(self):
-        # number of measured locations and time instants
-        numSpaceLocs,numTimeInstants = self.y_train.shape
-        
-        I = np.eye(numSpaceLocs)
-        R = np.zeros((numSpaceLocs, numSpaceLocs, numTimeInstants))
-        for t in np.arange(0, numTimeInstants):
-            R[:,:,t] = np.diag(self.noiseVar[:,t]).copy()
             
         def nll(theta):
             
@@ -80,17 +74,16 @@ class Gpkf:
                 K = np.where(np.any(np.diag(K) < 0), np.where(K_diag < 0, 1e-3, K_diag), K)
                 return K
             
-            self.kernel_time.lengthscale = theta[0]
-            self.kernel_time.variance = theta[1]
-            self.kernel_space.lengthscale = theta[2]
-            self.kernel_space.variance = theta[3]
-            
-            #Kss = self.kernel_space.sampled(self.params.data['spaceLocsMeas'], self.params.data['spaceLocsMeas'])
+            #self.kernel_time.set_params({'lengthscale' : theta[0], 'variance' : theta[1]})
+            #self.kernel_space.set_params({'lengthscale' : theta[2], 'variance' : theta[3]})
+            self.kernel_time.set_params(theta[:time_params_n])
+            self.kernel_space.set_params(theta[time_params_n:])
+
             Kss = self.kernel_space.sample(self.params.data['spaceLocsMeas'], self.params.data['spaceLocsMeas'])
             Kss[np.diag_indices_from(Kss)] += 1e-3 # Add epsilon to diagonal for numerical stability (positive definite requred for cholesky)
             self.Ks_chol = np.linalg.cholesky(Kss).conj().T
 
-            self.a, self.c, self.v0, self.q = createDiscreteTimeSys(self.kernel_time, self.params.data['samplingTime'])
+            self.a, self.c, self.v0, self.q = self.kernel_time.createDiscreteTimeSys(self.params.data['samplingTime'])
 
             # initialize quantities needed for kalman estimation
             A = np.kron(I,self.a)
@@ -104,17 +97,27 @@ class Gpkf:
             
             return logMarginal[0]
         
-        res = minimize(nll, [self.kernel_time.lengthscale, self.kernel_time.variance,
-                             self.kernel_space.lengthscale, self.kernel_space.variance], 
+        # number of measured locations and time instants
+        numSpaceLocs,numTimeInstants = self.y_train.shape
+        
+        I = np.eye(numSpaceLocs)
+        R = np.zeros((numSpaceLocs, numSpaceLocs, numTimeInstants))
+        for t in np.arange(0, numTimeInstants):
+            R[:,:,t] = np.diag(self.noiseVar[:,t]).copy()
+            
+        #time_params_n = len([item for items in self.kernel_time.get_params() for item in items])
+        #space_params_n = len([item for items in self.kernel_space.get_params() for item in items])
+        time_params_n = len(self.kernel_time.kernel[:])
+        space_params_n = len(self.kernel_space.kernel[:])
+        
+        res = minimize(nll, np.concatenate((self.kernel_time.kernel[:], self.kernel_space.kernel[:]), axis=0), 
                bounds=((1e-5, 1e+5), (1e-5, 1e+5), (1e-5, 1e+5), (1e-5, 1e+5)),
                method='L-BFGS-B')
-        
-        print('After first run:', res.fun)
 
         for r in np.arange(0, self.n_restarts):
             print('Optimizer restart:', r+1, ' of ',  self.n_restarts)
             
-            random_theta0 = loguniform.rvs(1e-5, 1e+5, size= 4)
+            random_theta0 = loguniform.rvs(1e-5, 1e+5, size= time_params_n + space_params_n)
             new_res = minimize(nll, random_theta0, 
                bounds=((1e-5, 1e+5), (1e-5, 1e+5), (1e-5, 1e+5), (1e-5, 1e+5)),
                method='L-BFGS-B')
@@ -122,9 +125,12 @@ class Gpkf:
                 res = new_res
         
         # Update parameters with best results
-        self.kernel_time.lengthscale, self.kernel_time.variance, self.kernel_space.lengthscale, self.kernel_space.variance = res.x
+        #self.kernel_time.set_params({'lengthscale': res.x[0], 'variance': res.x[1]})
+        #self.kernel_space.set_params({'lengthscale': res.x[2], 'variance': res.x[3]})
+        self.kernel_time.set_params(res.x[:time_params_n])
+        self.kernel_space.set_params(res.x[time_params_n:])
         
-        self.a, self.c, self.v0, self.q = createDiscreteTimeSys(self.kernel_time, self.params.data['samplingTime'])
+        self.a, self.c, self.v0, self.q = self.kernel_time.createDiscreteTimeSys(self.params.data['samplingTime'])
         
         #self.Ks_chol = np.linalg.cholesky(self.kernel_space.sampled(self.params.data['spaceLocsMeas'], self.params.data['spaceLocsMeas'])).conj().T
         self.Ks_chol = np.linalg.cholesky(self.kernel_space.sample(self.params.data['spaceLocsMeas'], self.params.data['spaceLocsMeas'])).conj().T
@@ -149,6 +155,8 @@ class Gpkf:
         # initialize quantities needed for kalman estimation
         I = np.eye(numSpaceLocs)
         A = np.kron(I,self.a)
+        print(A.shape)
+        print(np.kron(I, self.c).shape)
         C = self.Ks_chol @ np.kron(I,self.c)
         V0 = np.kron(I,self.v0)
         Q = np.kron(I,self.q)
@@ -274,10 +282,9 @@ class Gpkf:
             x[:,t] = xt[:,0]
             V[:,:,t] = Vt[:,:]
             
-            # computations for the marginal likelihood
+            # Marginal likelihood computations
             l1 = np.sum(np.log(np.linalg.eig(innovVar)[0]))
             l2 = innovation.conj().T @ np.linalg.lstsq(innovVar, innovation)[0]
-
             logMarginal = logMarginal +  0.5*(np.max(innovation.shape) * np.log(2*np.pi) + l1 + l2)
         
         return x, V, xp, Vp, logMarginal[0]
