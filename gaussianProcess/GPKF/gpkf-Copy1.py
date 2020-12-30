@@ -34,7 +34,7 @@ class Gpkf:
         # create space kernel
         self.kernel_space = kernel_space
         #self.Ks_chol = np.linalg.cholesky(self.kernel_space.sampled(self.params.data['spaceLocsMeas'], self.params.data['spaceLocsMeas'])).conj().T
-        self.Ks_chol = np.linalg.cholesky(self.kernel_space.sample(self.params.data['spaceLocsMeas'])).conj().T
+        self.Ks_chol = np.linalg.cholesky(self.kernel_space.sample(self.params.data['spaceLocsMeas'], self.params.data['spaceLocsMeas'])).conj().T
         
         # create DT state space model
         self.a, self.c, self.v0, self.q = self.kernel_time.createDiscreteTimeSys(self.params.data['samplingTime'])
@@ -67,13 +67,21 @@ class Gpkf:
             
         def nll(theta):
             
-            # Set hyperparameters to theta
+            def ensure_positive_diag(K):
+                """
+                Makes sure the diagonal of K has positive elements. Negative values are replaces with 0.01
+                """
+                K_diag = np.diag(np.diag(K))
+                K = np.where(np.any(np.diag(K) < 0), np.where(K_diag < 0, 1e-3, K_diag), K)
+                return K
+            
+            #self.kernel_time.set_params({'lengthscale' : theta[0], 'variance' : theta[1]})
+            #self.kernel_space.set_params({'lengthscale' : theta[2], 'variance' : theta[3]})
             self.kernel_time.set_params(theta[:time_params_n])
             self.kernel_space.set_params(theta[time_params_n:])
-            
-            # Sample the new kernels
-            Kss = self.kernel_space.sample(self.params.data['spaceLocsMeas'])
-            #Kss[np.diag_indices_from(Kss)] += 1e-4 # Add epsilon to diagonal for numerical stability (positive definite requred for cholesky)
+
+            Kss = self.kernel_space.sample(self.params.data['spaceLocsMeas'], self.params.data['spaceLocsMeas'])
+            Kss[np.diag_indices_from(Kss)] += 1e-3 # Add epsilon to diagonal for numerical stability (positive definite requred for cholesky)
             self.Ks_chol = np.linalg.cholesky(Kss).conj().T
 
             self.a, self.c, self.v0, self.q = self.kernel_time.createDiscreteTimeSys(self.params.data['samplingTime'])
@@ -103,30 +111,31 @@ class Gpkf:
         
         # Use ML to find best kernel parameters using initial guess
         res = minimize(nll, np.concatenate((self.kernel_time.kernel[:], self.kernel_space.kernel[:]), axis=0), 
-               bounds=[(1e-5, 1e+5) for i in range(time_params_n + space_params_n)],
+               bounds=([(1e-5, 1e+5) for i in range(time_params_n + space_params_n)]),
                method='L-BFGS-B')
-        
-        # Repeat for random guesses using loguniform
+
         for r in np.arange(0, self.n_restarts):
             print('Optimizer restart:', r+1, ' of ',  self.n_restarts)
             
             random_theta0 = loguniform.rvs(1e-5, 1e+5, size= time_params_n + space_params_n)
             
             new_res = minimize(nll, random_theta0, 
-               bounds=[(1e-5, 1e+5) for i in range(time_params_n + space_params_n)],
+               bounds=([(1e-5, 1e+5) for i in range(time_params_n + space_params_n)]),
                method='L-BFGS-B')
             
-            # Store best values
             if new_res.fun < res.fun:
                 res = new_res
         
         # Update parameters with best results
+        #self.kernel_time.set_params({'lengthscale': res.x[0], 'variance': res.x[1]})
+        #self.kernel_space.set_params({'lengthscale': res.x[2], 'variance': res.x[3]})
         self.kernel_time.set_params(res.x[:time_params_n])
         self.kernel_space.set_params(res.x[time_params_n:])
         
-        # Update state-space representation
         self.a, self.c, self.v0, self.q = self.kernel_time.createDiscreteTimeSys(self.params.data['samplingTime'])
-        self.Ks_chol = np.linalg.cholesky(self.kernel_space.sample(self.params.data['spaceLocsMeas'])).conj().T
+        
+        #self.Ks_chol = np.linalg.cholesky(self.kernel_space.sampled(self.params.data['spaceLocsMeas'], self.params.data['spaceLocsMeas'])).conj().T
+        self.Ks_chol = np.linalg.cholesky(self.kernel_space.sample(self.params.data['spaceLocsMeas'], self.params.data['spaceLocsMeas'])).conj().T
         
         print('Best hyperparameters and marginal log value')
         print(res.x)
@@ -148,6 +157,8 @@ class Gpkf:
         # initialize quantities needed for kalman estimation
         I = np.eye(numSpaceLocs)
         A = np.kron(I,self.a)
+        print(A.shape)
+        print(np.kron(I, self.c).shape)
         C = self.Ks_chol @ np.kron(I, self.c)
         V0 = np.kron(I,self.v0)
         Q = np.kron(I,self.q)
@@ -202,14 +213,14 @@ class Gpkf:
         print(logMarginal)
 
         kernelSection = self.kernel_space.sample(spaceLocsPred, self.params.data['spaceLocsMeas'])
-        kernelPrediction = self.kernel_space.sample(spaceLocsPred)
-        Ks = self.kernel_space.sample(self.params.data['spaceLocsMeas'])
+        kernelPrediction = self.kernel_space.sample(spaceLocsPred, spaceLocsPred)
+        Ks = self.kernel_space.sample(self.params.data['spaceLocsMeas'], self.params.data['spaceLocsMeas'])
         Ks_inv = np.linalg.inv(Ks)
 
         numSpaceLocsPred = np.max(spaceLocsPred.shape)
         numTimeInsts = np.max(self.params.data['timeInstants'].shape)
         predictedCov = np.zeros((numSpaceLocsPred, numSpaceLocsPred, numTimeInsts))
-        scale = self.kernel_time.sample(np.array([[0]]))[0][0] # = gamma(0) #self.kernel_time.lengthscale
+        scale = self.kernel_time.lengthscale # !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
         predictedMean = kernelSection @ (Ks_inv @ postMean)
                 
         for t in np.arange(0, numTimeInsts):

@@ -5,6 +5,7 @@ import re
 import seaborn as sns
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
+from matplotlib import animation
 
 """
 def plot_gp(mu, cov, X, X_train=None, Y_train=None, samples=[]):
@@ -163,3 +164,15 @@ def plotPerColumnDistribution(df, nGraphShown, nGraphPerRow):
         plt.xticks(rotation = 90)
         plt.title(f'{colNames[i]}')
     plt.show()
+    
+def animate_heatmap(data):
+    fig = plt.figure()
+    sns.heatmap(data[0], vmax=.8, square=True)
+
+    def init():
+        sns.heatmap(np.zeros((data.shape[0], data.shape[1])), square=True, cbar=False)
+
+    def animate(i):
+        sns.heatmap(data[i], square=True, cbar=False)
+
+    anim = animation.FuncAnimation(fig, animate, init_func=init, frames=20, repeat = False)

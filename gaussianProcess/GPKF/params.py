@@ -59,7 +59,7 @@ class Params(object):
             
             self.data['timeInstants'] = df.index.T
 
-            self.data['noiseStd'] = 0.5
+            self.data['noiseStd'] = 0.05
 
             self.data['kernel'] = {}
 
@@ -93,7 +93,7 @@ class Params(object):
         # Define prediction mesh
         xx, yy, zz = np.meshgrid(np.arange(0,66,6), 3, np.arange(0,66,6))
         self.data['spaceLocsPredIdx'] = np.arange(0, 11*11)
-        self.data['spaceLocsPred'] = np.column_stack([xx.flatten(), yy.flatten(), zz.flatten()])
+        #self.data['spaceLocsPred'] = np.column_stack([xx.flatten(), yy.flatten(), zz.flatten()])
         
         #self.data['spaceLocsPredIdx'] = np.arange(0, 53) #np.setdiff1d(self.data['spaceLocsIdx'], self.data['spaceLocsMeasIdx'])
         #self.data['spaceLocsPred'] = np.linspace(0,13,53) #self.data['spaceLocs'][self.data['spaceLocsPredIdx']]

@@ -66,7 +66,7 @@ class Kernel(ABC):
             G = np.append(np.zeros((stateDim-1,1)),1.0)[np.newaxis].T # input matrix
 
         # output matrix
-        C = np.zeros((1,stateDim))
+        C = np.zeros((1,stateDim))[0]
         C[0:np.max(num_coeff.shape)] = num_coeff
 
         # state variance as solution of the lyapunov equation
@@ -88,12 +88,15 @@ class Kernel(ABC):
 
         return A, C, V, Q
     
-    def sample(self, X1, X2):
+    def sample(self, X1, X2 = None):
         """
            Returns the kernel sampled across the desired input set
         """
-        dist = self.kernel._scaled_dist(X1, X2)
-        return self.kernel.K_of_r(dist)
+        K = self.kernel.K(X1, X2)
+        if X2 is None:
+            K[np.diag_indices_from(K)] += 1e-4 # Add epsilon to diagonal for numerical stability (positive definite requred for cholesky)
+        
+        return K
         
     def __add__(self, other):
         """
@@ -117,12 +120,12 @@ class CombinationKernel(Kernel):
     def set_params(self, hyperparams):
         self.kernel[:] = hyperparams
         for idx, kern in enumerate(self.parts):
-            kern.set_params(self.kernel.parameters[idx][:])
+            kern.set_params(kern.kernel[:])
             
     def get_params(self):
         params = []
         for kern in self.parts:
-            params.append(kern.get_params[0])
+            params.append(kern.get_params()[0])
         
     
 class AddedKernels(CombinationKernel):
@@ -148,26 +151,19 @@ class AddedKernels(CombinationKernel):
             At, Ct, Vt, Qt = part.createDiscreteTimeSys(Ts)
             
             A = block_diag(A, At) if (A is not None) else At
-            C = block_diag(C, Ct) if (C is not None) else Ct
+            C = np.hstack((C, Ct)) if (C is not None) else Ct
             V = block_diag(V, Vt) if (V is not None) else Vt
             Q = block_diag(Q, Qt) if (Q is not None) else Qt
         
         return A, C, V, Q
-    
-        num, den = [], []
-        for part in self.parts:
-            num_p, den_p = part.get_psd()
-            num.append(num_p)
-            den.append(den_p)
-        
     
     def get_state_transition():
         raise NotImplementedError("Attempting to get state transition matrix of added kernels not implemented. Try getting it for each separate kernel instead...")
             
     
 class Matern32Kernel(Kernel):
-    def __init__(self, input_dim, lengthscale, variance):
-        super().__init__(GPy.kern.Matern32(input_dim = input_dim, lengthscale = lengthscale, variance = variance))
+    def __init__(self, input_dim, variance, lengthscale, active_dims = None, ARD=False):
+        super().__init__(GPy.kern.Matern32(input_dim = input_dim, active_dims = active_dims, lengthscale = lengthscale, variance = variance, ARD = ARD))
     
     def get_psd(self):
         lam = np.sqrt(3.0)/self.lengthscale
@@ -181,17 +177,17 @@ class Matern32Kernel(Kernel):
         return np.exp(-Ts * lam) * (Ts * np.array([[lam, 1.0], [-lam**2.0, -lam]]) + np.eye(2))
     
 class ExponentialKernel(Kernel):
-    def __init__(self, params):
-        super().__init__(params)
-        
-    def kernelFunction(self, x1, x2):
-        return self.lengthscale * np.exp(-np.linalg.norm(x1-x2) / self.variance)
+    def __init__(self, input_dim, variance, lengthscale):
+        super().__init__(GPy.kern.Exponential(input_dim = input_dim, lengthscale = lengthscale, variance = variance))
     
     def get_psd(self):
-        num = np.array([np.sqrt(2*self.lengthscale / self.variance)])
-        den = np.array([1/self.variance])
+        num = np.array([np.sqrt(2*self.variance / self.lengthscale)])
+        den = np.array([1/self.lengthscale])
         
         return num, den
+    
+    def get_state_transition(self, Ts):
+        return np.broadcast_to(np.exp(-Ts/self.lengthscale), [1,1])
     
     
 class PeriodicKernel(Kernel):
