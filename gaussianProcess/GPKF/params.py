@@ -59,7 +59,7 @@ class Params(object):
             
             self.data['timeInstants'] = df.index.T
 
-            self.data['noiseStd'] = 0.05
+            self.data['noiseStd'] = 0.5
 
             self.data['kernel'] = {}
 

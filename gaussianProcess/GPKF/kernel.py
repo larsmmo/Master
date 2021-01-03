@@ -16,17 +16,21 @@ class Kernel(ABC):
         self.variance = self.kernel.variance[0]
         #for parameter, value in parameters.items():
         #   setattr(self, parameter, value)
+        
+    """def get_params(self, deep = True):
+        return {'kernel':self.kernel}"""
            
-    def get_params(self, deep = True):
+    def get_hyperparams(self, deep = True):
         """
         Get parameters of kernel. If deep = True, also return parameters for contained kernels
         
         Output: Dict of parameter names mapped to their values
         """
-        return [[self.lengthscale, self.variance]]
-        #params = dict()
+        print('Got kernel params')
+        return self.kernel[:]
+        #params = dict() 
         
-    def set_params(self, hyperparams):
+    def set_hyperparams(self, hyperparams):
         self.variance = hyperparams[0]
         self.lengthscale = hyperparams[1]
         
@@ -117,15 +121,15 @@ class CombinationKernel(Kernel):
     def __init__(self, kernels):
         self.parts = kernels
         
-    def set_params(self, hyperparams):
+    def set_hyperparams(self, hyperparams):
         self.kernel[:] = hyperparams
         for idx, kern in enumerate(self.parts):
             kern.set_params(kern.kernel[:])
             
-    def get_params(self):
+    def get_hyperparams(self):
         params = []
         for kern in self.parts:
-            params.append(kern.get_params()[0])
+            params.append(kern.get_hyperparams()[0])
         
     
 class AddedKernels(CombinationKernel):

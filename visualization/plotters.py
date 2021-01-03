@@ -6,6 +6,7 @@ import seaborn as sns
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 from matplotlib import animation
+from IPython import display
 
 """
 def plot_gp(mu, cov, X, X_train=None, Y_train=None, samples=[]):
@@ -167,12 +168,16 @@ def plotPerColumnDistribution(df, nGraphShown, nGraphPerRow):
     
 def animate_heatmap(data):
     fig = plt.figure()
-    sns.heatmap(data[0], vmax=.8, square=True)
+    sns.heatmap(data[:,:,0], square=True, cmap = 'rocket')
 
     def init():
-        sns.heatmap(np.zeros((data.shape[0], data.shape[1])), square=True, cbar=False)
+        sns.heatmap(np.zeros((data.shape[0], data.shape[1])), square=True, cbar=False, cmap='rocket')
 
     def animate(i):
-        sns.heatmap(data[i], square=True, cbar=False)
+        sns.heatmap(data[:,:,i], square=True, cbar=False, cmap='rocket')
 
-    anim = animation.FuncAnimation(fig, animate, init_func=init, frames=20, repeat = False)
+    anim = animation.FuncAnimation(fig, animate, init_func=init, frames=np.arange(0,data.shape[2],10), repeat = False, interval = 100)
+    video = anim.to_html5_video()
+    html = display.HTML(video)
+    display.display(html)
+    plt.close()

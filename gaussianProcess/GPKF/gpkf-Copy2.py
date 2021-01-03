@@ -6,7 +6,6 @@ from scipy.optimize import minimize
 from scipy.stats import loguniform
 
 import sklearn.gaussian_process.kernels
-from sklearn.metrics import mean_squared_error, mean_absolute_error, log_loss, r2_score
 
 from kernel import Kernel
 from params import Params
@@ -105,9 +104,14 @@ class Gpkf:
 
             x,V,xp,Vp,logMarginal = self.kalmanEst(A,C,Q,V0,R, y)
             
-            print(logMarginal[0])
+            print_n += 1
+            if np.mod(print_n, print_interval) == 0:
+                print(logMarginal[0])
             
             return logMarginal[0]
+        
+        print_interval = 8
+        print_n = 0
  
         # Getting some useful values
         numSpaceLocs, numTimeInstants = y.shape
@@ -270,7 +274,7 @@ class Gpkf:
         # Undo normalization
         if self.normalize_y and not prediction:
             #posteriorMean = self.y_train_std * posteriorMean + self.y_train_mean
-            posteriorMean = posteriorMean #+ np.nanmean(y)
+            posteriorMean = posteriorMean + np.nanmean(y)
             #posteriorCov = posteriorCov * self.y_train_std**2
         
         return posteriorMean, posteriorCov, logMarginal
@@ -295,7 +299,7 @@ class Gpkf:
         Ks_inv = np.linalg.inv(Ks)
 
         numSpaceLocsPred = np.max(spaceLocsPred.shape)
-        numTimeInsts = .shape[1] # np.max(self.params.data['timeInstants'].shape)
+        numTimeInsts = np.max(self.params.data['timeInstants'].shape)
         predictedCov = np.zeros((numSpaceLocsPred, numSpaceLocsPred, numTimeInsts))
         scale = self.kernel_time.sample(np.array([[0]]))[0][0]  # This is the same as gamma(0) = lengthscale
         predictedMean = kernelSection @ (Ks_inv @ postMean)
@@ -307,7 +311,7 @@ class Gpkf:
         # Undo normalization
         if self.normalize_y:
             #predictedMean = self.y_train_std * predictedMean + self.y_train_mean
-            predictedMean = predictedMean #+ np.nanmean(y)
+            predictedMean = predictedMean + np.nanmean(y)
             #predictedCov = predictedCov * self.y_train_std**2
 
         return predictedMean, predictedCov
@@ -368,12 +372,53 @@ class Gpkf:
         
         return x, V, xp, Vp, logMarginal[0]
         
-    def score(self, X, y):
-        
-        y_pred, _ = self.predict(X, y)
-        
-        return r2_score(y[~np.isnan(y)], y_pred[~np.isnan(y)])
-        
-        
     """def __str__(self):
         return 'Time kernel: \n'+ str(self.kernel_time) + '\n' + 'Space kernel: \n' + str(self.kernel_space)"""
+
+def createDiscreteTimeSys(kernel, Ts):
+    """
+    builds the discrete time ss system in canonical form, given the numerator and
+    denominator coefficients of the companion form
+
+    INPUT:  Temporal kernel and sampling time Ts for the
+            discretization
+
+    OUTPUT: matrix A,C,V,Q: state matrix, output matrix,
+            state variance matrix (solution of lyapunov equation), 
+            and measurement variance matrix
+    """
+    # state dimension
+    num_coeff, den_coeff = kernel.get_psd()
+    stateDim  = np.max(den_coeff.shape)
+    if stateDim ==1:
+        F = -den_coeff       # state matrix
+        A = np.exp(F * Ts)   # Discretization
+        G = np.array([1])    #L
+    else:
+        F = np.diag(np.ones((1,stateDim-1)).flatten(),1).copy()
+        F[stateDim-1, :] = -den_coeff
+        A = kernel.get_state_transition(Ts) #expm(F * Ts)  # state matrix
+        G = np.append(np.zeros((stateDim-1,1)),1.0)[np.newaxis].T # input matrix
+    
+    # output matrix
+    C = np.zeros((1,stateDim))
+    C[0:np.max(num_coeff.shape)] = num_coeff
+
+    # state variance as solution of the lyapunov equation
+    V = solve_continuous_lyapunov(F, -np.matmul(G, G.conj().T))
+
+    # discretization of the noise matrix
+    Q = np.zeros(stateDim)
+    Ns = 10000        
+    t = Ts/Ns
+    if stateDim == 1:
+        for n in np.arange(t, Ts+t, step=t):
+            Q = Q + t * np.exp(F * n) * np.dot(G,G.conj().T) * np.exp(F * n).conj().T
+    else:
+        for n in np.arange(t, Ts+t, step=t):
+            #Q = Q + np.linalg.multi_dot([t, expm(np.dot(F,n)), np.dot(G,G.conj().T), expm(np.dot(F,n)).conj().T])
+            #Q = Q + t * expm(F * n) @ (G @G.conj().T) @ (expm(F * n)).conj().T
+            Fn = kernel.get_state_transition(n)
+            Q = Q + t * Fn @ (G @G.conj().T) @ Fn.conj().T
+    
+    return A, C, V, Q
