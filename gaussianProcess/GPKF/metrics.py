@@ -10,6 +10,8 @@ def print_metrics(y_true, y_pred):
     OUTPUT: 
         MSE, RMSE, R2
     """
+    y_true = y_true[~np.isnan(y_true)]
+    y_pred = y_pred[~np.isnan(y_true)]
     print('---------------------------\n')
     print('Metrics: \n')
     print('MAE: ' + str(mean_absolute_error(y_true, y_pred)))

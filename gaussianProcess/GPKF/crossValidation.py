@@ -28,14 +28,11 @@ class TimeSplitter(object):
         ----------
         data: pandas DataFrame
             your data, contain one column for the record date 
-        validation_split_date: datetime.date()
-            first date to perform the splitting on.
-            if not provided will set to be the minimum date in the data after the first training set
-        date_column: string, deafult='record_date'
-            date of each record
+        validation_split_date: 
+            Date to first split from
+            default is first timestamp for training data
         gap: int, default=0
-            for cases the test set does not come right after the train set,
-            *gap* days are left between train and test sets
+            gap between train and test set, in time units
         
         Output:
             list of tuples (train index, test index)

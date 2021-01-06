@@ -192,7 +192,7 @@ class ExponentialKernel(Kernel):
     
     def get_state_transition(self, Ts):
         return np.broadcast_to(np.exp(-Ts/self.lengthscale), [1,1])
-    
+
     
 class PeriodicKernel(Kernel):
     def __init__(self, params):
