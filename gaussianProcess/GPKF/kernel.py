@@ -44,6 +44,26 @@ class Kernel(ABC):
     def get_state_transition(self):
         raise NotImplementedError("No default kernel. Please specify a type (exponential, periodic etc.)")
         
+    def get_state_matrix(self):
+        """
+        Creates a companion-form state-space matrix from numerator and denumerator coefficients
+        of the spectral density function of a kernel.
+        
+        Outputs:
+            F: state-space matrix
+            state_dim: number of states
+        """
+        num_coeff, den_coeff = self.get_psd()
+        state_dim  = np.max(den_coeff.shape)
+        
+        if state_dim == 1:
+            F = -den_coeff
+        else:
+            F = np.diag(np.ones((1,stateDim-1)).flatten(), 1).copy()  # Hopefully there is a better way to do this
+            F[stateDim-1, :] = -den_coeff
+        
+        return F, state_dim
+        
     def createDiscreteTimeSys(self, Ts):
         """
         Builds the discrete time state-space system in canonical form, using numerator and
@@ -58,37 +78,30 @@ class Kernel(ABC):
         
         # state dimension
         num_coeff, den_coeff = self.get_psd()
-        stateDim  = np.max(den_coeff.shape)
-        if stateDim ==1:
-            F = -den_coeff       # state matrix
-            A = np.exp(F * Ts)   # Discretization
-            G = np.array([1])    #L
-        else:
-            F = np.diag(np.ones((1,stateDim-1)).flatten(),1).copy()
-            F[stateDim-1, :] = -den_coeff
-            A = self.get_state_transition(Ts) #expm(F * Ts)  # state matrix
-            G = np.append(np.zeros((stateDim-1,1)),1.0)[np.newaxis].T # input matrix
 
+        F, state_dim = self.get_state_matrix()          # State matrix
+        A = self.get_state_transition(Ts)               # State transition matrix = expm(F*Ts)
+        G = np.eye(1, state_dim, k = state_dim-1).T     # Input matrix
+        
         # output matrix
-        C = np.zeros((1,stateDim))[0]
+        C = np.zeros((1,state_dim))[0]
         C[0:np.max(num_coeff.shape)] = num_coeff
 
         # state variance as solution of the lyapunov equation
         V = solve_continuous_lyapunov(F, -np.matmul(G, G.conj().T))
 
         # discretization of the noise matrix
-        Q = np.zeros(stateDim)
+        Q = np.zeros(state_dim)
         Ns = 10000        
         t = Ts/Ns
-        if stateDim == 1:
+        if state_dim == 1:
             for n in np.arange(t, Ts+t, step=t):
                 Q = Q + t * np.exp(F * n) * np.dot(G,G.conj().T) * np.exp(F * n).conj().T
         else:
             for n in np.arange(t, Ts+t, step=t):
                 #Q = Q + np.linalg.multi_dot([t, expm(np.dot(F,n)), np.dot(G,G.conj().T), expm(np.dot(F,n)).conj().T])
-                #Q = Q + t * expm(F * n) @ (G @G.conj().T) @ (expm(F * n)).conj().T
                 Fn = self.get_state_transition(n)   # REMEMBER TO WRITE ABOUT THIS OPTIMIZATION
-                Q = Q + t * Fn @ (G @G.conj().T) @ Fn.conj().T
+                Q = Q + t * Fn @ (G @ G.conj().T) @ Fn.conj().T
 
         return A, C, V, Q
     
@@ -153,7 +166,7 @@ class AddedKernels(CombinationKernel):
         
         for part in self.parts:
             At, Ct, Vt, Qt = part.createDiscreteTimeSys(Ts)
-            
+                
             A = block_diag(A, At) if (A is not None) else At
             C = np.hstack((C, Ct)) if (C is not None) else Ct
             V = block_diag(V, Vt) if (V is not None) else Vt
@@ -163,7 +176,56 @@ class AddedKernels(CombinationKernel):
     
     def get_state_transition():
         raise NotImplementedError("Attempting to get state transition matrix of added kernels not implemented. Try getting it for each separate kernel instead...")
+       
+    
+class ProductKernels(CombinationKernel):
+    def __init__(self, kernels):
+        subkerns = []
+        for kern in kernels:
+            if isinstance(kern, Kernel):
+                subkerns.append(kern)
+        
+        super(AddedKernels, self).__init__(subkerns)
+        self.kernel = kernels[0].kernel * kernels[1].kernel
+        
+    def get_psd(self):
+        raise NotImplementedError("Attempting to get psd of added kernels not implemented. Try getting psd for each separate kernel instead...")
+        
+    def createDiscreteTimeSys(self, Ts):
+        A = np.array((0,), ndmin=2)
+        C = np.array((1,), ndmin=2)
+        V = np.array((1,), ndmin=2)
+        Q = np.array((1,), ndmin=2)
+        
+        for part in self.parts:
+            At, Ct, Vt, Qt = part.createDiscreteTimeSys(Ts)
             
+            #if part.__class__.__name__ == 'CosineKernel':
+            
+            A = np.kron(A, At)
+            C = np.kron(C, Ct)
+            V = np.kron(V, Vt)
+            Q = np.kron(Q, Qt)
+        
+        return A, C, V, Q
+    
+    def get_state_transition():
+        raise NotImplementedError("Attempting to get state transition matrix of added kernels not implemented. Try getting it for each separate kernel instead...")
+    
+    
+class ExponentialKernel(Kernel):
+    def __init__(self, input_dim, variance, lengthscale):
+        super().__init__(GPy.kern.Exponential(input_dim = input_dim, lengthscale = lengthscale, variance = variance))
+    
+    def get_psd(self):
+        num = np.array([np.sqrt(2*self.variance / self.lengthscale)])
+        den = np.array([1/self.lengthscale])
+        
+        return num, den
+    
+    def get_state_transition(self, Ts):
+        return np.broadcast_to(np.exp(-Ts/self.lengthscale), [1,1])
+    
     
 class Matern32Kernel(Kernel):
     def __init__(self, input_dim, variance, lengthscale, active_dims = None, ARD=False):
@@ -179,34 +241,71 @@ class Matern32Kernel(Kernel):
     def get_state_transition(self, Ts):
         lam = np.sqrt(3.0)/self.lengthscale
         return np.exp(-Ts * lam) * (Ts * np.array([[lam, 1.0], [-lam**2.0, -lam]]) + np.eye(2))
-    
-class ExponentialKernel(Kernel):
-    def __init__(self, input_dim, variance, lengthscale):
-        super().__init__(GPy.kern.Exponential(input_dim = input_dim, lengthscale = lengthscale, variance = variance))
-    
-    def get_psd(self):
-        num = np.array([np.sqrt(2*self.variance / self.lengthscale)])
-        den = np.array([1/self.lengthscale])
-        
-        return num, den
-    
-    def get_state_transition(self, Ts):
-        return np.broadcast_to(np.exp(-Ts/self.lengthscale), [1,1])
 
+
+class CosineKernel(Kernel):
+    def __init__(self, variance, lengthscale, period):
+        self.variance = variance
+        self.lengthscale = lengthscale
+        self.period = period
+        
+    def get_psd(self):
+        return 0
+        
+    def get_state_transition(self, Ts):
+        
+        return np.array([[np.cos(self.period), ]])
     
 class PeriodicKernel(Kernel):
-    def __init__(self, params):
-        super().__init__(params)
-        self.frequency = self.kernel.period[0]
+    def __init__(self, variance, lengthscale, period):
+        self.variance = variance
+        self.lengthscale = lengthscale
+        self.period = period
         
     def kernelFunction(x1,x2):
-        return self.lengthscale * np.cos(2*pi*self.frequency * np.linalg.norm(x1-x2)) * np.exp(-np.linalg.norm(x1-x2)/self.variance)
+        return self.lengthscale * np.cos(2*pi*self.period * np.linalg.norm(x1-x2)) * np.exp(-np.linalg.norm(x1-x2)/self.variance)
     
     def get_psd(self):
         num = np.array([np.sqrt(2*self.lengthscale / self.variance) * np.array([np.sqrt((1/self.variance)**2 + (2*np.pi*self.frequency)**2) , 1])])         
         den = np.array([((1/self.variance)**2 + (2*np.pi*self.frequency)**2 ), 2/self.variance])
         
         return num, den
+    
+    def get_state_transition(self, Ts):
+        lam = np.sqrt(3.0)/self.lengthscale
+        #return np.exp(-Ts * lam) * (Ts * np.array([[lam, 1.0], [-]]))
+        return 0
+
+class PeriodicMatern12(Kernel):
+    def __init__(self, variance, lengthscale, period):
+        super().__init__(Gpy.kern.PeriodicMatern32(input_dim = input_dim, variance = variance, period = period))
+        self.period = period
+        
+    def get_psd(self):
+        lam = np.sqrt(3.0)/self.lengthscale
+        # Matern kernel 
+        num_q = np.array([np.sqrt(12.0 * 3.0**0.5/ self.lengthscale **3.0 * self.variance)])
+        den_q = np.array([lam ** 2, 2*lam])
+        
+        # Periodic kernel
+        #num_p = 
+        #den_p = 
+    
+    
+class PeriodcMatern32(Kernel):
+    def __init__(self, variance, lengthscale, period):
+        super().__init__(Gpy.kern.PeriodicMatern32(input_dim = input_dim, variance = variance, period = period))
+        self.period = period
+        
+    def get_psd(self):
+        lam = np.sqrt(3.0)/self.lengthscale
+        # Matern kernel 
+        num_q = np.array([np.sqrt(12.0 * 3.0**0.5/ self.lengthscale **3.0 * self.variance)])
+        den_q = np.array([lam ** 2, 2*lam])
+        
+        # Periodic kernel
+        #num_p = 
+        #den_p = 
     
     
 class GaussianKernel(Kernel):
@@ -221,6 +320,8 @@ class GaussianKernel(Kernel):
     
     def get_state_transition(self, Ts):
         return 0
+    
+
 
 """
 class SeparableKernel(Kernel):

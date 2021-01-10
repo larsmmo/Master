@@ -270,7 +270,6 @@ class Gpkf:
         outputCovPred = O3.copy()
 
         for t in np.arange(0, numTimeInstants):
-            
             # extract variance
             posteriorCov[:,:,t] = C @ V[:,:,t] @ C.conj().T
             posteriorCovPred[:,:,t] = C @ Vp[:,:,t] @ C.conj().T
@@ -279,10 +278,10 @@ class Gpkf:
             outputCov[:,:,t] = posteriorCov[:,:,t] + R[:,:,t]
             outputCovPred[:,:,t] = posteriorCovPred[:,:,t] + R[:,:,t]
             
-        # Undo normalization
+        # Undo normalization only if we predict at fitted locations
         if self.normalize_y and not prediction:
             #posteriorMean = self.y_train_std * posteriorMean + self.y_train_mean
-            posteriorMean = posteriorMean #+ self.y_train_mean #+ np.nanmean(y)
+            posteriorMean = posteriorMean + self.y_train_mean #+ np.nanmean(y)
             #posteriorCov = posteriorCov * self.y_train_std**2
         
         return posteriorMean, posteriorCov, logMarginal
@@ -296,13 +295,17 @@ class Gpkf:
         
         OUTPUT: predictedMean, predictedCov: kalman estimates
         """
-
-        if timeInstants[-1] > self.y_train_timeInstants[-1]:  # TODO: rework to add predictions inbetween measurements
-            # Add locations we want to predict for that are after t_k (last fitted measurement in time)
-            y = np.concatenate((self.y_train, np.full((self.y_train.shape[0], int(timeInstants[-1] - self.y_train_timeInstants[-1])), np.nan)), axis=1)
-            self.y_train_timeInstants = np.arange(self.y_train_timeInstants[0], timeInstants[-1] + 1)
-            print(self.y_train_timeInstants.shape)
-            self.noiseVar = (self.params.data['noiseStd']**2) * np.ones(y.shape)
+        if timeInstants is not None:
+            if timeInstants[-1] > self.y_train_timeInstants[-1]:  # TODO: rework to add predictions inbetween measurements
+                # Add locations we want to predict for that are after t_k (last fitted measurement in time)
+                y = np.concatenate((self.y_train, np.full((self.y_train.shape[0], int(timeInstants[-1] - self.y_train_timeInstants[-1])), np.nan)), axis=1)
+                self.y_train = y
+                self.y_train_timeInstants = np.arange(self.y_train_timeInstants[0], timeInstants[-1] + 1)
+                print(self.y_train_timeInstants.shape)
+                self.noiseVar = (self.params.data['noiseStd']**2) * np.ones(y.shape)
+                
+            else:
+                y = self.y_train
         else:
             y = self.y_train
             
@@ -311,7 +314,7 @@ class Gpkf:
         print(logMarginal)
 
         kernelSection = self.kernel_space.sample(spaceLocsPred, self.params.data['spaceLocsMeas'])
-        kernelPrediction = self.kernel_space.sample(spaceLocsPred)
+        kernelPrediction = self.kernel_space.sample(spaceLocsPred, spaceLocsPred)
         Ks = self.kernel_space.sample(self.params.data['spaceLocsMeas'])
         Ks_inv = np.linalg.inv(Ks)
 
@@ -372,15 +375,24 @@ class Gpkf:
             notNanPos = np.logical_not(np.isnan(y[:,t]))
             Ct = C[notNanPos,:]
             Rt = noiseVar[:,:,t][np.ix_(notNanPos, notNanPos)]
-
-            innovation = y[:,t][np.newaxis].T[np.ix_(notNanPos)] -  (Ct @ xpt)
-            innovVar = Ct @ Vpt @ Ct.conj().T + Rt
-            K = np.linalg.solve(innovVar.conj().T, (np.matmul(Vpt, Ct.conj().T)).conj().T).conj().T   # kalman gain
+            
+            # Error residual
+            innovation = y[:,t][np.newaxis].T[np.ix_(notNanPos)] -  np.dot(Ct, xpt)
+            
+            # Common subexpression computation for performance
+            VptCtt = np.dot(Vpt, Ct.conj().T)   
+            # Projection of system uncertainty into measurement space
+            innovVar = np.dot(Ct, VptCtt) + Rt 
+            # Mapping system uncertainty into Kalman gain
+            K = np.linalg.solve(innovVar.conj().T, VptCtt.conj().T).conj().T 
+            
+            # Scale residual by Kalman gain and predict new state
             correction = K @ innovation
-
             xt = xpt + correction
-
-            Vt = (I - (K @ Ct)) @ Vpt  @ (I - (K @ Ct)).conj().T + (K @ Rt @ K.conj().T)
+            
+            I_KdotCt = I - np.dot(K, Ct) # Common subexpression
+            Vt = np.dot(np.dot(I_KdotCt, Vpt), I_KdotCt.conj().T) + np.dot(np.dot(K, Rt), K.conj().T)
+            #Vt = I_KdotCt @ Vpt  @ I_KdotCt.conj().T + (K @ Rt @ K.conj().T)
 
             # save values
             xp[:,t] = xpt[:,0]
