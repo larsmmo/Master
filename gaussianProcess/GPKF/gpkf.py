@@ -12,7 +12,8 @@ from kernel import Kernel
 from params import Params
 
 class Gpkf:
-    def __init__(self, params, y_train, y_train_timeInstants, kernel_time, kernel_space, normalize_y = True, n_restarts = 2):
+    def __init__(self, params, y_train, y_train_timeInstants, kernel_time, kernel_space, normalize_y = True, n_restarts = 2, ID = 0):
+        self.ID = ID
         self.params = params # Todo: fix structure
         self.normalize_y = normalize_y
         self.n_restarts = n_restarts
@@ -84,23 +85,21 @@ class Gpkf:
     def fit(self, X, timeInstants, y):
         
         def nll(theta):
-            
             # Set hyperparameters to theta
             self.kernel_time.set_hyperparams(theta[:time_params_n])
             self.kernel_space.set_hyperparams(theta[time_params_n:])
 
-            # Sample the new kernels
+            # Calculate covariances for space kernel
             Kss = self.kernel_space.sample(X)
-            #Kss[np.diag_indices_from(Kss)] += 1e-4 # Add epsilon to diagonal for numerical stability (positive definite requred for cholesky)
             self.Ks_chol = np.linalg.cholesky(Kss).conj().T
 
             self.a, self.c, self.v0, self.q = self.kernel_time.createDiscreteTimeSys(self.params.data['samplingTime'])
 
             # initialize quantities needed for kalman estimation
-            A = np.kron(I,self.a)
+            A = np.kron(I, self.a)
             C = self.Ks_chol @ np.kron(I,self.c)
-            V0 = np.kron(I,self.v0)
-            Q = np.kron(I,self.q)
+            V0 = np.kron(I, self.v0)
+            Q = np.kron(I, self.q)
 
             x,V,xp,Vp,logMarginal = self.kalmanEst(A,C,Q,V0,R, y)
             
@@ -118,7 +117,7 @@ class Gpkf:
             self.y_train = y
         
         self.y_train_timeInstants = timeInstants
-    
+        
         # Getting some useful values
         numSpaceLocs, numTimeInstants = y.shape
         time_params_n = len(self.kernel_time.kernel[:])
@@ -131,7 +130,7 @@ class Gpkf:
         R = np.zeros((numSpaceLocs, numSpaceLocs, numTimeInstants))
         for t in np.arange(0, numTimeInstants):
             R[:,:,t] = np.diag(self.noiseVar[:,t]).copy()
-        
+
         # Use ML to find best kernel parameters using initial guess
         res = minimize(nll, np.concatenate((self.kernel_time.kernel[:], self.kernel_space.kernel[:]), axis=0), 
                bounds=[(1e-4, 1e+4) for i in range(time_params_n + space_params_n)],
@@ -163,75 +162,6 @@ class Gpkf:
         print(res.x)
         print(res.fun)
         
-    def optimize(self, y):
-            
-        def nll(theta):
-            
-            # Set hyperparameters to theta
-            self.kernel_time.set_hyperparams(theta[:time_params_n])
-            self.kernel_space.set_hyperparams(theta[time_params_n:])
-            
-            # Sample the new kernels
-            Kss = self.kernel_space.sample(self.params.data['spaceLocsMeas'])
-            #Kss[np.diag_indices_from(Kss)] += 1e-4 # Add epsilon to diagonal for numerical stability (positive definite requred for cholesky)
-            self.Ks_chol = np.linalg.cholesky(Kss).conj().T
-
-            self.a, self.c, self.v0, self.q = self.kernel_time.createDiscreteTimeSys(self.params.data['samplingTime'])
-
-            # initialize quantities needed for kalman estimation
-            A = np.kron(I,self.a)
-            C = self.Ks_chol @ np.kron(I,self.c)
-            V0 = np.kron(I,self.v0)
-            Q = np.kron(I,self.q)
-
-            x,V,xp,Vp,logMarginal = self.kalmanEst(A,C,Q,V0,R, y)
-
-            print(logMarginal[0])
-            
-            return logMarginal[0]
-        
-        # Getting some useful values
-        numSpaceLocs, numTimeInstants = y.shape
-        time_params_n = len(self.kernel_time.kernel[:])
-        space_params_n = len(self.kernel_space.kernel[:])
-        
-        # Create noise matrix
-        I = np.eye(numSpaceLocs)
-        R = np.zeros((numSpaceLocs, numSpaceLocs, numTimeInstants))
-        for t in np.arange(0, numTimeInstants):
-            R[:,:,t] = np.diag(self.noiseVar[:,t]).copy()
-        
-        # Use ML to find best kernel parameters using initial guess
-        res = minimize(nll, np.concatenate((self.kernel_time.kernel[:], self.kernel_space.kernel[:]), axis=0), 
-               bounds=[(1e-5, 1e+5) for i in range(time_params_n + space_params_n)],
-               method='L-BFGS-B')
-        
-        # Repeat for random guesses using loguniform
-        for r in np.arange(0, self.n_restarts):
-            print('Optimizer restart:', r+1, ' of ',  self.n_restarts)
-            
-            random_theta0 = loguniform.rvs(1e-5, 1e+5, size= time_params_n + space_params_n)
-            
-            new_res = minimize(nll, random_theta0, 
-               bounds=[(1e-5, 1e+5) for i in range(time_params_n + space_params_n)],
-               method='L-BFGS-B')
-            
-            # Store best values
-            if new_res.fun < res.fun:
-                res = new_res
-        
-        # Update parameters with best results
-        self.kernel_time.set_hyperparams(res.x[:time_params_n])
-        self.kernel_space.set_hyperparams(res.x[time_params_n:])
-        
-        # Update state-space representation
-        self.a, self.c, self.v0, self.q = self.kernel_time.createDiscreteTimeSys(self.params.data['samplingTime'])
-        self.Ks_chol = np.linalg.cholesky(self.kernel_space.sample(self.params.data['spaceLocsMeas'])).conj().T
-        
-        print('Best hyperparameters and marginal log value')
-        print(res.x)
-        print(res.fun)
-                   
         
     def estimate(self, y, prediction = True):
         """
@@ -435,3 +365,7 @@ class Gpkf:
         
     """def __str__(self):
         return 'Time kernel: \n'+ str(self.kernel_time) + '\n' + 'Space kernel: \n' + str(self.kernel_space)"""
+    
+    def to_dict(self):
+        return ("Model" + str(self.ID) + 
+            "Time kernel: " + vars(self.kernel_time) + "\nSpace kernel: " + vars(self.kernel_space))
