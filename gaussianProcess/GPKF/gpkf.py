@@ -351,16 +351,11 @@ class Gpkf:
         #meas = np.concatenate((self.y_train, np.full(y.shape, np.nan)), axis=1)
                               
         y_pred, _ = self.predict(spaceLocsPred, timeInstants)
-        
-        print(targets.shape)
+
         y_true = targets[~np.isnan(targets)]
-        print(y_true.shape)
-        print(y_pred.shape)
         y_pred = y_pred[~np.isnan(targets)]
-        print(y_pred.shape)
         
         return {'RMSE' : mean_squared_error(y_true, y_pred, squared=False), 'MAE' : mean_absolute_error(y_true, y_pred), 'R2' : r2_score(y_true, y_pred)}
-        #return mean_squared_error(y[~np.isnan(y)], y_pred[~np.isnan(y)])
         
         
     """def __str__(self):

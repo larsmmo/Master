@@ -256,6 +256,27 @@ class Matern32Kernel(Kernel):
     def state_transition(self, Ts):
         lam = np.sqrt(3.0)/self.lengthscale
         return np.exp(-Ts * lam) * (Ts * np.array([[lam, 1.0], [-lam**2.0, -lam]]) + np.eye(2))
+    
+    
+class Matern52Kernel(Kernel):
+    def __init__(self, input_dim, variance, lengthscale, active_dims = None, ARD=False):
+        super().__init__(GPy.kern.Matern52(input_dim = input_dim, active_dims = active_dims, lengthscale = lengthscale, variance = variance, ARD = ARD))
+    
+    def psd(self):
+        lam = np.sqrt(3.0)/self.lengthscale
+        num = np.array([np.sqrt(self.variance * 400.0 * 5.0**0.5/ 3.0 / self.lengthscale **5.0)])
+        den = np.array([lam ** 3.0, 3.0*lam**2.0, 3.0*lam])
+        
+        return num, den
+    
+    def state_transition(self, Ts):
+        lam = np.sqrt(5.0)/self.lengthscale
+        TsLam = Ts * lam
+        return np.exp(-TsLam) \
+            * (dt * np.array([[lam * (0.5 * TsLam + 1.0),      TsLam + 1.0,            0.5 * Ts],
+                              [-0.5 * Tslam * lam ** 2,        lam * (1.0 - TsLam),    1.0 - 0.5 * TsLam],
+                              [lam ** 3 * (0.5 * TsLam - 1.0), lam ** 2 * (TsLam - 3), lam * (0.5 * TsLam - 2.0)]])
+               + np.eye(3))
 
 
 class CosineKernel(Kernel):
@@ -280,8 +301,8 @@ class PeriodicKernel(Kernel):
         
     def set_hyperparams(self, hyperparams):
         self.variance = hyperparams[0]
-        self.lengthscale = hyperparams[1]
-        self.freq = hyperparams[2]
+        self.freq = hyperparams[1]
+        self.lengthscale = hyperparams[2]
         
         self.kernel[:] = hyperparams
     
@@ -326,8 +347,8 @@ class PeriodcMatern32(Kernel):
     
     
 class GaussianKernel(Kernel):
-    def __init__(self, input_dim, lengthscale, variance):
-        super().__init__(GPy.kern.RBF(input_dim=input_dim, variance=variance, lengthscale=lengthscale))
+    def __init__(self, input_dim, lengthscale, variance, ARD = False):
+        super().__init__(GPy.kern.RBF(input_dim=input_dim, variance=variance, lengthscale=lengthscale, ARD = ARD))
         
     def kernelFunction(self, x1, x2):
         return self.lengthscale * (np.exp(-np.linalg.norm(x1-x2)**2 / (2*self.variance**2)))
