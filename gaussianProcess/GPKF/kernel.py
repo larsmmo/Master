@@ -141,8 +141,11 @@ class CombinationKernel(Kernel):
         
     def set_hyperparams(self, hyperparams):
         self.kernel[:] = hyperparams
+        i = 0
         for idx, kern in enumerate(self.parts):
-            kern.set_hyperparams(kern.kernel[:])
+            kern_params_n = len(kern.kernel[:])
+            kern.set_hyperparams(hyperparams[i : i + kern_params_n])
+            i += kern_params_n
             
     def get_hyperparams(self):
         params = []
@@ -273,8 +276,8 @@ class Matern52Kernel(Kernel):
         lam = np.sqrt(5.0)/self.lengthscale
         TsLam = Ts * lam
         return np.exp(-TsLam) \
-            * (dt * np.array([[lam * (0.5 * TsLam + 1.0),      TsLam + 1.0,            0.5 * Ts],
-                              [-0.5 * Tslam * lam ** 2,        lam * (1.0 - TsLam),    1.0 - 0.5 * TsLam],
+            * (Ts * np.array([[lam * (0.5 * TsLam + 1.0),      TsLam + 1.0,            0.5 * Ts],
+                              [-0.5 * TsLam * lam ** 2,        lam * (1.0 - TsLam),    1.0 - 0.5 * TsLam],
                               [lam ** 3 * (0.5 * TsLam - 1.0), lam ** 2 * (TsLam - 3), lam * (0.5 * TsLam - 2.0)]])
                + np.eye(3))
 

@@ -1,6 +1,10 @@
 import pandas as pd
 import numpy as np
 
+from sklearn.base import clone
+
+from joblib import Parallel, delayed
+
 #Code inspired by https://towardsdatascience.com/time-based-cross-validation-d259b13d42b8
 
 class TimeSplitter(object):
@@ -80,3 +84,50 @@ class TimeSplitter(object):
             n_splits : int
         """
         return self.n_splits 
+    
+# Number of jobs to run in parallel
+N_JOBS = -1#10
+N_SPLITS = 5
+N_REPEATS = 4
+
+def fit_and_score(estimator, X, y, train_index, test_index, df):
+    y_train_fold = y[:,np.nonzero(np.in1d(df.index, train_index))[0]]
+    y_test_fold = y[:,np.nonzero(np.in1d(df.index, test_index))[0]]
+    estimator.fit(X, train_index, y_train_fold)
+    score = estimator.score(X, test_index, y_test_fold, metric = "RMSE")
+    
+    return score
+    
+    
+def cv_prediction(estimator, X, y, df):
+    """
+    Performs cross-validation on an estimator, spreading fitting and scoring over multiple jobs
+    """
+ 
+    n_jobs = N_JOBS
+ 
+    splitter = TimeSplitter(1200, 240)
+    split_index = splitter.split(df)
+ 
+    parallel = Parallel(n_jobs=n_jobs)
+    scores = parallel(
+        delayed(fit_and_score)(
+            clone(estimator), X, y, train_index, test_index, df
+        ) for  train_index, test_index in split_index
+    )
+ 
+    return np.array(scores)
+    
+    
+def cv_gridsearch(estimator, X, y, df, cv):
+    
+
+    
+
+def scorer(estimator, X, y):
+    y_pred, _ = estimator.predict(X, timeInstants)
+
+    y_true = targets[~np.isnan(targets)]
+    y_pred = y_pred[~np.isnan(targets)]
+
+    return mean_squared_error(y_true, y_pred, squared=False)

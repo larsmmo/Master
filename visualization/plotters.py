@@ -92,8 +92,10 @@ def plot_gp(x_mesh, x, y, y_pred, y_cov, samples=[]):
     plt.ylabel('$f(x)$')
     plt.legend(loc='upper left')
     
-def plot_residuals(y_pred, residuals):
-    plt.scatter(y_pred, residuals, s=7, marker ='o', color='r', label='Residual')
+def plot_residuals(y_pred, targets):
+    plt.figure(figsize=(16,12))
+    residuals = targets[~np.isnan(targets)] - y_pred[~np.isnan(targets)]
+    plt.scatter(y_pred[~np.isnan(targets)], residuals, s=7, marker ='o', color='r', label='Residual')
     plt.axhline(y=0.0, color='black', linestyle='-')
     plt.xlabel('$Predicted$')
     plt.ylabel('$Residual$')
