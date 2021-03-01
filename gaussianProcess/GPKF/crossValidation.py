@@ -90,16 +90,16 @@ N_JOBS = -1#10
 N_SPLITS = 5
 N_REPEATS = 4
 
-def fit_and_score(estimator, X, y, train_index, test_index, df):
+def fit_and_score(estimator, X, y, train_index, test_index, df, optimize = False):
     y_train_fold = y[:,np.nonzero(np.in1d(df.index, train_index))[0]]
     y_test_fold = y[:,np.nonzero(np.in1d(df.index, test_index))[0]]
-    estimator.fit(X, train_index, y_train_fold)
+    estimator.fit(X, train_index, y_train_fold, optimize = optimize, fun = 'RMSE')
     score = estimator.score(X, test_index, y_test_fold, metric = "RMSE")
     
     return score
     
     
-def cv_prediction(estimator, X, y, df):
+def cv_prediction(estimator, X, y, df, optimize = False):
     """
     Performs cross-validation on an estimator, spreading fitting and scoring over multiple jobs
     """
@@ -112,7 +112,7 @@ def cv_prediction(estimator, X, y, df):
     parallel = Parallel(n_jobs=n_jobs)
     scores = parallel(
         delayed(fit_and_score)(
-            clone(estimator), X, y, train_index, test_index, df
+            clone(estimator), X, y, train_index, test_index, df, optimize
         ) for  train_index, test_index in split_index
     )
  
@@ -120,7 +120,7 @@ def cv_prediction(estimator, X, y, df):
     
     
 def cv_gridsearch(estimator, X, y, df, cv):
-    
+    return 0
 
     
 

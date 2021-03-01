@@ -82,9 +82,16 @@ class Gpkf:
 
         return {str(v): k for v, k in enumerate(np.concatenate((self.kernel_time.kernel[:], self.kernel_space.kernel[:]), axis=0))}"""
     
-    def fit(self, X, timeInstants, y, optimize = False, fun = None):
-        
-        def nll(theta):
+    def fit(self, spaceLocsMeas, timeInstants, y, optimize = False, fun = None):
+        """
+        INPUT:
+            spaceLocsMeas: Spatial indices of measurements to be fitted
+            timeInstants: Temporal indices of measurements to be fitted
+            y: Target values for the given spatial and temporal indices
+            optimize: Whether to optimize kernel parameters or not
+            fun: Objective function to be minimized in case of optimization
+        """
+        def obj(theta):
             # Set hyperparameters to theta
             self.kernel_time.set_hyperparams(theta[:time_params_n])
             self.kernel_space.set_hyperparams(theta[time_params_n:])
@@ -92,7 +99,7 @@ class Gpkf:
             print(theta)
             
             # Calculate covariances for space kernel
-            Kss = self.kernel_space.sample(X)
+            Kss = self.kernel_space.sample(spaceLocsMeas)
             self.Ks_chol = np.linalg.cholesky(Kss).conj().T
             
             self.a, self.c, self.v0, self.q = self.kernel_time.createDiscreteTimeSys(self.params.data['samplingTime'])
@@ -102,12 +109,18 @@ class Gpkf:
             C = self.Ks_chol @ np.kron(I,self.c)
             V0 = np.kron(I, self.v0)
             Q = np.kron(I, self.q)
-
-            x,V,xp,Vp,logMarginal = self.kalmanEst(A,C,Q,V0,R, y, computeLikelihood = True)
             
-            print(logMarginal)
+            score = None
             
-            return logMarginal
+            if fun == 'nll':
+                x,V,xp,Vp,logMarginal = self.kalmanEst(A,C,Q,V0,R, y, computeLikelihood = True)
+                score = logMarginal
+            elif fun == 'RMSE':
+                score = self.score(spaceLocsMeas, timeInstants, y, metric = 'RMSE')
+            
+            print(score)
+            
+            return score
         
         if self.normalize_y:
             self.y_train_mean = np.nanmean(y)
@@ -120,7 +133,7 @@ class Gpkf:
         
         self.y_train_timeInstants = timeInstants
         
-        if optimize is True:
+        if optimize is True and fun is not None:
             # Getting some useful values
             numSpaceLocs, numTimeInstants = y.shape
             time_params_n = len(self.kernel_time.kernel[:])
@@ -135,7 +148,7 @@ class Gpkf:
                 R[:,:,t] = np.diag(self.noiseVar[:,t]).copy()
 
             # Use ML to find best kernel parameters using initial guess
-            res = minimize(cv, np.concatenate((self.kernel_time.kernel[:], self.kernel_space.kernel[:]), axis=0), 
+            res = minimize(obj, np.concatenate((self.kernel_time.kernel[:], self.kernel_space.kernel[:]), axis=0), 
                    bounds=[(1e-3, 1e+4) for i in range(time_params_n + space_params_n)],
                    method='L-BFGS-B')
 
@@ -145,7 +158,7 @@ class Gpkf:
 
                 random_theta0 = loguniform.rvs(1e-4, 1e+4, size= time_params_n + space_params_n)
 
-                new_res = minimize(cv, random_theta0, 
+                new_res = minimize(obj, random_theta0, 
                    bounds=[(1e-3, 1e+4) for i in range(time_params_n + space_params_n)],
                    method='L-BFGS-B')
 
@@ -159,7 +172,7 @@ class Gpkf:
 
             # Update state-space representation
             self.a, self.c, self.v0, self.q = self.kernel_time.createDiscreteTimeSys(self.params.data['samplingTime'])
-            self.Ks_chol = np.linalg.cholesky(self.kernel_space.sample(X)).conj().T
+            self.Ks_chol = np.linalg.cholesky(self.kernel_space.sample(spaceLocsMeas)).conj().T
 
             print('Best hyperparameters and marginal log value')
             print(res.x)
@@ -229,7 +242,6 @@ class Gpkf:
         
         OUTPUT: predictedMean, predictedCov: kalman estimates
         """
-        
         
         if timeInstants is not None:
             if timeInstants[-1] > self.y_train_timeInstants[-1]:  # TODO: rework to add predictions inbetween measurements
@@ -343,7 +355,7 @@ class Gpkf:
         
         return x, V, xp, Vp, logMarginal
         
-    def score(self, spaceLocsPred, timeInstants, targets, metric = None):
+    def score(self, spaceLocs, timeInstants, targets, metric = None):
         """
         Returns a dict of score metrics for predicted values against target values
         
@@ -356,7 +368,7 @@ class Gpkf:
         # Append nan values we want to predict
         #meas = np.concatenate((self.y_train, np.full(y.shape, np.nan)), axis=1)
                               
-        y_pred, _ = self.predict(spaceLocsPred, timeInstants)
+        y_pred, _ = self.predict(spaceLocs, timeInstants)
 
         y_true = targets[~np.isnan(targets)]
         y_pred = y_pred[~np.isnan(targets)]

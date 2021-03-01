@@ -26,9 +26,7 @@ class Kernel(ABC):
         
         Output: Dict of parameter names mapped to their values
         """
-        print('Got kernel params')
         return self.kernel[:]
-        #params = dict() 
         
     def set_hyperparams(self, hyperparams):
         self.variance = hyperparams[0]
@@ -113,7 +111,7 @@ class Kernel(ABC):
         """
         K = self.kernel.K(X1, X2)
         if X2 is None:
-            K[np.diag_indices_from(K)] += 1e-4 # Add epsilon to diagonal for numerical stability (positive definite requred for cholesky)
+            K[np.diag_indices_from(K)] += 1e-4 # Add epsilon to diagonal for numerical stability (helps ensure positive-definiteness)
         
         return K
         
@@ -246,7 +244,7 @@ class ExponentialKernel(Kernel):
     
     
 class Matern32Kernel(Kernel):
-    def __init__(self, input_dim, variance, lengthscale, active_dims = None, ARD=False):
+    def __init__(self, input_dim,  variance, lengthscale, active_dims = None, ARD=False):
         super().__init__(GPy.kern.Matern32(input_dim = input_dim, active_dims = active_dims, lengthscale = lengthscale, variance = variance, ARD = ARD))
     
     def psd(self):
@@ -310,7 +308,7 @@ class PeriodicKernel(Kernel):
         self.kernel[:] = hyperparams
     
     def psd(self):
-        num = np.array([np.sqrt(2*self.lengthscale / self.variance) * np.array([np.sqrt((1/self.variance)**2 + (2*np.pi*self.freq)**2) , 1])])         
+        num = np.sqrt(2*self.lengthscale / self.variance) * np.array([np.sqrt((1/self.variance)**2 + (2*np.pi*self.freq)**2) , 1])       
         den = np.array([((1/self.variance)**2 + (2*np.pi*self.freq)**2 ), 2/self.variance])
         
         return num, den
@@ -350,8 +348,8 @@ class PeriodcMatern32(Kernel):
     
     
 class GaussianKernel(Kernel):
-    def __init__(self, input_dim, lengthscale, variance, ARD = False):
-        super().__init__(GPy.kern.RBF(input_dim=input_dim, variance=variance, lengthscale=lengthscale, ARD = ARD))
+    def __init__(self, input_dim, lengthscale, variance, active_dims = None, ARD = False):
+        super().__init__(GPy.kern.RBF(input_dim=input_dim, active_dims=active_dims, variance=variance, lengthscale=lengthscale, ARD = ARD))
         
     def kernelFunction(self, x1, x2):
         return self.lengthscale * (np.exp(-np.linalg.norm(x1-x2)**2 / (2*self.variance**2)))
