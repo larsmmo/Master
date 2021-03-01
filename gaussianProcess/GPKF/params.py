@@ -1,6 +1,11 @@
 import numpy as np
 
 class Params(object):
+    """
+    Temporary parameter structure (imported from matlab)
+    
+    To be deprecated
+    """
     def __init__(self, df, locations, dataset_name):
         self.dataset = dataset_name
         self.optimizer_restarts = 2

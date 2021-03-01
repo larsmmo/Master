@@ -1,7 +1,0 @@
-
-{'a': 123, 'b': 333, 'c': 444}
-{'a': 123, 'b': 333, 'c': 444}
-{'a': 123, 'b': 333, 'c': 444}
-  [1mExponential.[0;0m  |      value  |  constraints  |  priors
-  [1mvariance    [0;0m  |       6.77  |      +ve      |        
-  [1mlengthscale [0;0m  |  169.40548  |      +ve      |        {'input_dim': 1, 'active_dims': [0], 'name': 'Exponential', 'useGPU': False, 'variance': [6.77], 'lengthscale': [169.40548], 'ARD': False, 'class': 'GPy.kern.Exponential'}{'input_dim': 1, 'active_dims': [0], 'name': 'Exponential', 'useGPU': False, 'variance': [6.77], 'lengthscale': [169.40548], 'ARD': False, 'class': 'GPy.kern.Exponential'}

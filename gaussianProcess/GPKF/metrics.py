@@ -3,6 +3,7 @@ from sklearn.metrics import mean_squared_error, mean_absolute_error, log_loss, r
 
 def print_metrics(y_true, y_pred):
     """
+    Utility function for printing metrics
     INPUT:
         y_true: the true measurements
         y_pred: the predicted measurements
