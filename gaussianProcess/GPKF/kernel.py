@@ -134,6 +134,10 @@ class Kernel(ABC):
     
     
 class CombinationKernel(Kernel):
+    """
+    A class representing a combination of kernels, added or multiplied.
+    Contains functionality for proper hyperparameter handling for combined kernels.
+    """
     def __init__(self, kernels):
         self.parts = kernels
         
@@ -152,6 +156,9 @@ class CombinationKernel(Kernel):
         
     
 class AddedKernels(CombinationKernel):
+    """
+    AddedKernels class for kernel addition functionality
+    """
     def __init__(self, kernels):
         subkerns = []
         for kern in kernels:

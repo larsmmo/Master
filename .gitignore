@@ -32,4 +32,7 @@ target/
 # pyenv
 .python-version
 
+# notes
+todos.txt
+
 
