@@ -12,11 +12,11 @@ from kernel import Kernel
 from params import Params
 
 class Gpkf:
-    def __init__(self, params, kernel_time, kernel_space, normalize_y = True, n_restarts = 2, ID = 0):
+    def __init__(self, params, kernel_time, kernel_space, alpha = 0.5, normalize_y = True, ID = 0):
         self.ID = ID
-        self.params = params # Todo: fix structure
+        #self.params = params # Todo: fix structure
+        self.alpha = alpha
         self.normalize_y = normalize_y
-        self.n_restarts = n_restarts
         
         """# standardize measurements
         self.y_train_mean = np.nanmean(y_train)
@@ -37,11 +37,10 @@ class Gpkf:
         
         # Set space kernel
         self.kernel_space = kernel_space
-        #self.Ks_chol = np.linalg.cholesky(self.kernel_space.sampled(self.params.data['spaceLocsMeas'], self.params.data['spaceLocsMeas'])).conj().T
-        self.Ks_chol = np.linalg.cholesky(self.kernel_space.sample(self.params.data['spaceLocsMeas'])).conj().T
+        #self.Ks_chol = np.linalg.cholesky(self.kernel_space.sample(self.params.data['spaceLocsMeas'])).conj().T
         
         # create DT state space model
-        self.a, self.c, self.v0, self.q = self.kernel_time.createDiscreteTimeSys(self.params.data['samplingTime'])
+        self.a, self.c, self.v0, self.q = self.kernel_time.createDiscreteTimeSys()
         
     
     """def set_params(self, **parameters):
@@ -65,7 +64,7 @@ class Gpkf:
         """
         """print({'params':self.params, 'n_restarts': self.n_restarts, 'kernel_time':self.kernel_time,
                 'kernel_space':self.kernel_space, 'normalize_y':self.normalize_y, 'y_train':self.y_train, 'y_train_timeInstants': self.y_train_timeInstants})"""
-        return {'params':self.params, 'n_restarts': self.n_restarts, 'kernel_time':self.kernel_time,
+        return {'alpha':self.alpha, 'kernel_time':self.kernel_time,
                 'kernel_space':self.kernel_space, 'normalize_y':self.normalize_y}
     
     def set_params(self, **parameters):
@@ -82,7 +81,7 @@ class Gpkf:
 
         return {str(v): k for v, k in enumerate(np.concatenate((self.kernel_time.kernel[:], self.kernel_space.kernel[:]), axis=0))}"""
     
-    def fit(self, spaceLocsMeas, timeInstants, y, optimize = False, fun = None):
+    def fit(self, spaceLocsMeas, timeInstants, y, optimize = False, fun = None, n_restarts = 0):
         """
         INPUT:
             spaceLocsMeas: Spatial indices of measurements to be fitted
@@ -96,17 +95,17 @@ class Gpkf:
             self.kernel_time.set_hyperparams(theta[:time_params_n])
             self.kernel_space.set_hyperparams(theta[time_params_n:])
             
-            print(theta)
+            #print(theta)
             
             # Calculate covariances for space kernel
             Kss = self.kernel_space.sample(spaceLocsMeas)
-            self.Ks_chol = np.linalg.cholesky(Kss).conj().T
+            Ks_chol = np.linalg.cholesky(Kss).conj().T
             
-            self.a, self.c, self.v0, self.q = self.kernel_time.createDiscreteTimeSys(self.params.data['samplingTime'])
+            self.a, self.c, self.v0, self.q = self.kernel_time.createDiscreteTimeSys()
 
             # initialize quantities needed for kalman estimation
             A = np.kron(I, self.a)
-            C = self.Ks_chol @ np.kron(I,self.c)
+            C = Ks_chol @ np.kron(I,self.c)
             V0 = np.kron(I, self.v0)
             Q = np.kron(I, self.q)
             
@@ -121,6 +120,8 @@ class Gpkf:
             print(score)
             
             return score
+        
+        self.spaceLocsMeas = spaceLocsMeas
         
         if self.normalize_y:
             self.y_train_mean = np.nanmean(y)
@@ -140,7 +141,7 @@ class Gpkf:
             space_params_n = len(self.kernel_space.kernel[:])
 
             # Create noise matrix
-            self.noiseVar = (self.params.data['noiseStd']**2) * np.ones(y.shape)
+            self.noiseVar = (self.alpha**2) * np.ones(y.shape)
 
             I = np.eye(numSpaceLocs)
             R = np.zeros((numSpaceLocs, numSpaceLocs, numTimeInstants))
@@ -153,8 +154,8 @@ class Gpkf:
                    method='L-BFGS-B')
 
             # Repeat for random guesses using loguniform
-            for r in np.arange(0, self.n_restarts):
-                print('Optimizer restart:', r+1, ' of ',  self.n_restarts)
+            for r in np.arange(0, n_restarts):
+                print('Optimizer restart:', r+1, ' of ',  n_restarts)
 
                 random_theta0 = loguniform.rvs(1e-4, 1e+4, size= time_params_n + space_params_n)
 
@@ -171,8 +172,8 @@ class Gpkf:
             self.kernel_space.set_hyperparams(res.x[time_params_n:])
 
             # Update state-space representation
-            self.a, self.c, self.v0, self.q = self.kernel_time.createDiscreteTimeSys(self.params.data['samplingTime'])
-            self.Ks_chol = np.linalg.cholesky(self.kernel_space.sample(spaceLocsMeas)).conj().T
+            self.a, self.c, self.v0, self.q = self.kernel_time.createDiscreteTimeSys()
+            #self.Ks_chol = np.linalg.cholesky(self.kernel_space.sample(spaceLocsMeas)).conj().T
 
             print('Best hyperparameters and marginal log value')
             print(res.x)
@@ -194,11 +195,12 @@ class Gpkf:
         # initialize quantities needed for kalman estimation
         I = np.eye(numSpaceLocs)
         A = np.kron(I,self.a)
-        C = self.Ks_chol @ np.kron(I, self.c)
+        Ks_chol = np.linalg.cholesky(self.kernel_space.sample(self.spaceLocsMeas)).conj().T
+        C = Ks_chol @ np.kron(I, self.c)
         V0 = np.kron(I,self.v0)
         Q = np.kron(I,self.q)
         R = np.zeros((numSpaceLocs, numSpaceLocs, numTimeInstants))
-        self.noiseVar = (self.params.data['noiseStd']**2) * np.ones(y.shape)
+        self.noiseVar = (self.alpha**2) * np.ones(y.shape)
         for t in np.arange(0, numTimeInstants):
             R[:,:,t] = np.diag(self.noiseVar[:,t]).copy()
         
@@ -260,9 +262,9 @@ class Gpkf:
         
         #print(logMarginal)
 
-        kernelSection = self.kernel_space.sample(spaceLocsPred, self.params.data['spaceLocsMeas'])
+        kernelSection = self.kernel_space.sample(spaceLocsPred, self.spaceLocsMeas)
         kernelPrediction = self.kernel_space.sample(spaceLocsPred, spaceLocsPred)
-        Ks = self.kernel_space.sample(self.params.data['spaceLocsMeas'])
+        Ks = self.kernel_space.sample(self.spaceLocsMeas)
         Ks_inv = np.linalg.inv(Ks)
 
         numSpaceLocsPred = np.max(spaceLocsPred.shape)
@@ -295,7 +297,7 @@ class Gpkf:
         Returns the prediction and corrections computed by means of standard
         iterative kalman filtering procedure
 
-        INPUT:  (A,C,Q,V0) model matrices, noise variance
+        INPUT:  (A,C,Q,V0) = model matrices, noise variance, targets
 
         OUTPUT: x,V,xp,Vp estimates and predictions with corresponding covariance.
                 logMarginal marginal log-likelihood
@@ -328,8 +330,10 @@ class Gpkf:
             
             # Common subexpression computation for performance
             VptCtt = np.dot(Vpt, Ct.conj().T)   
+            
             # Projection of system uncertainty into measurement space
             innovVar = np.dot(Ct, VptCtt) + Rt 
+            
             # Mapping system uncertainty into Kalman gain
             K = np.linalg.solve(innovVar.conj().T, VptCtt.conj().T).conj().T 
             

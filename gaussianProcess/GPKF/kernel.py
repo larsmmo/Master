@@ -11,7 +11,7 @@ class Kernel(ABC):
     Abstract basececlass for kernels. Implemented as a wapper around GPy kernels.
     """
     def __init__(self, kernel):
-        self.kernel = kernel
+        self.kernel = kernel   # GPy kernel
         self.lengthscale = self.kernel.lengthscale[0]
         self.variance = self.kernel.variance[0]
         #for parameter, value in parameters.items():
@@ -62,7 +62,7 @@ class Kernel(ABC):
         
         return F, state_dim
         
-    def createDiscreteTimeSys(self, Ts):
+    def createDiscreteTimeSys(self, Ts = 1.0):
         """
         Builds the discrete time state-space system in canonical form, using numerator and
         denominator coefficients of the companion form
@@ -94,7 +94,7 @@ class Kernel(ABC):
         t = Ts/Ns
         if state_dim == 1:
             for n in np.arange(t, Ts+t, step=t):
-                Q = Q + t * np.exp(F * n) * np.dot(G,G.conj().T) * np.exp(F * n).conj().T
+                Q = Q + t * np.exp(F*n) * np.dot(G,G.conj().T) * np.exp(F*n).conj().T
         else:
             for n in np.arange(t, Ts+t, step=t):
                 #Q = Q + np.linalg.multi_dot([t, expm(np.dot(F,n)), np.dot(G,G.conj().T), expm(np.dot(F,n)).conj().T])
@@ -109,7 +109,7 @@ class Kernel(ABC):
         """
            Returns the kernel sampled across the desired input set
         """
-        K = self.kernel.K(X1, X2)
+        K = self.kernel.K(X1, X2)   # .K = GPy kernel sampling, see their documentation
         if X2 is None:
             K[np.diag_indices_from(K)] += 1e-4 # Add epsilon to diagonal for numerical stability (helps ensure positive-definiteness)
         
@@ -164,7 +164,7 @@ class AddedKernels(CombinationKernel):
     def psd(self):
         raise NotImplementedError("Attempting to get psd of added kernels not implemented. Try getting psd for each separate kernel instead...")
         
-    def createDiscreteTimeSys(self, Ts):
+    def createDiscreteTimeSys(self, Ts = 1.0):
         A = None
         C = None
         V = None
@@ -197,7 +197,7 @@ class ProductKernels(CombinationKernel):
     def psd(self):
         raise NotImplementedError("Attempting to get psd of multiplied kernels not implemented. Try getting psd for each separate kernel instead...")
         
-    def createDiscreteTimeSys(self, Ts):
+    def createDiscreteTimeSys(self, Ts = 1.0):
         A = np.array((0,), ndmin=2)
         C = np.array((1,), ndmin=2)
         V = np.array((1,), ndmin=2)
