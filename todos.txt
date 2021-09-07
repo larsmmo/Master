@@ -1,0 +1,24 @@
+TO DO
+
+Code:
+
+- Fix location data
+- Grid search code
+- Check CV-techniques
+	- LOO
+	- hierarchial
+	- temporal/spatial
+- Write file for Simon
+- Test kernel multiplication
+- Go back to 1 or 2 dimensions to verify findings
+
+
+Report:
+
+- Re-write theory sections
+- Make data figures
+	- Oxygen
+	- CTD
+- Oxygen heteroscedasticity
+- Write introduction
+- 

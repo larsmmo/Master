@@ -12,9 +12,9 @@ from kernel import Kernel
 from params import Params
 
 class Gpkf:
-    def __init__(self, params, kernel_time, kernel_space, alpha = 0.5, normalize_y = True, ID = 0):
+    def __init__(self, kernel_time, kernel_space, alpha = 0.5, normalize_y = True, ID = 0):
+        
         self.ID = ID
-        #self.params = params # Todo: fix structure
         self.alpha = alpha
         self.normalize_y = normalize_y
         
@@ -39,7 +39,7 @@ class Gpkf:
         self.kernel_space = kernel_space
         #self.Ks_chol = np.linalg.cholesky(self.kernel_space.sample(self.params.data['spaceLocsMeas'])).conj().T
         
-        # create DT state space model
+        # Initialize DT state space model
         self.a, self.c, self.v0, self.q = self.kernel_time.createDiscreteTimeSys()
         
     
