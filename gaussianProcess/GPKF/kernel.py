@@ -229,7 +229,7 @@ class ProductKernels(CombinationKernel):
         return F
     
     
-class ExponentialKernel(Kernel):
+class Exponential(Kernel):
     def __init__(self, input_dim, variance, lengthscale):
         super().__init__(GPy.kern.Exponential(input_dim = input_dim, lengthscale = lengthscale, variance = variance))
     
@@ -243,7 +243,7 @@ class ExponentialKernel(Kernel):
         return np.broadcast_to(np.exp(-Ts/self.lengthscale), [1,1])
     
     
-class Matern32Kernel(Kernel):
+class Matern32(Kernel):
     def __init__(self, input_dim,  variance, lengthscale, active_dims = None, ARD=False):
         super().__init__(GPy.kern.Matern32(input_dim = input_dim, active_dims = active_dims, lengthscale = lengthscale, variance = variance, ARD = ARD))
     
@@ -259,7 +259,7 @@ class Matern32Kernel(Kernel):
         return np.exp(-Ts * lam) * (Ts * np.array([[lam, 1.0], [-lam**2.0, -lam]]) + np.eye(2))
     
     
-class Matern52Kernel(Kernel):
+class Matern52(Kernel):
     def __init__(self, input_dim, variance, lengthscale, active_dims = None, ARD=False):
         super().__init__(GPy.kern.Matern52(input_dim = input_dim, active_dims = active_dims, lengthscale = lengthscale, variance = variance, ARD = ARD))
     
@@ -280,7 +280,7 @@ class Matern52Kernel(Kernel):
                + np.eye(3))
 
 
-class CosineKernel(Kernel):
+class Cosine(Kernel):
     def __init__(self, variance, lengthscale, period):
         self.variance = variance
         self.lengthscale = lengthscale
@@ -293,7 +293,7 @@ class CosineKernel(Kernel):
         
         return np.array([[np.cos(self.period), ]])
     
-class PeriodicKernel(Kernel):
+class Periodic(Kernel):
     def __init__(self, input_dim, variance, lengthscale, period):
         super().__init__(GPy.kern.StdPeriodic(input_dim=input_dim, variance = variance, lengthscale=lengthscale, period=period))
         self.variance = variance
@@ -347,7 +347,7 @@ class PeriodcMatern32(Kernel):
                       []])
     
     
-class GaussianKernel(Kernel):
+class RBF(Kernel):
     def __init__(self, input_dim, lengthscale, variance, active_dims = None, ARD = False):
         super().__init__(GPy.kern.RBF(input_dim=input_dim, active_dims=active_dims, variance=variance, lengthscale=lengthscale, ARD = ARD))
         

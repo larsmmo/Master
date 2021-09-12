@@ -247,7 +247,7 @@ class Gpkf:
         
         if timeInstants is not None:
             if timeInstants[-1] > self.y_train_timeInstants[-1]:  # TODO: rework to add predictions inbetween measurements
-                # Add locations we want to predict for that are after t_k (last fitted measurement in time)
+                # Add entries we want to predict for that are after t_k (last fitted measurement in time)
                 y = np.concatenate((self.y_train, np.full((self.y_train.shape[0], int(timeInstants[-1] - self.y_train_timeInstants[-1])), np.nan)), axis=1)
                 self.y_train = y
                 self.y_train_timeInstants = np.arange(self.y_train_timeInstants[0], timeInstants[-1] + 1)
