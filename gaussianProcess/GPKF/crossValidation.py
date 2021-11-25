@@ -91,11 +91,14 @@ N_SPLITS = 5
 N_REPEATS = 4
 
 def fit_and_score(estimator, X, y, train_index, test_index, df, optimize = False):
+    print("start fitting", train_index[0])
     y_train_fold = y[:,np.nonzero(np.in1d(df.index, train_index))[0]]
     y_test_fold = y[:,np.nonzero(np.in1d(df.index, test_index))[0]]
+    print("here", train_index[0])
     estimator.fit(X, train_index, y_train_fold, optimize = optimize, fun = 'RMSE')
+    print("fitted", train_index[0])
     score = estimator.score(X, test_index, y_test_fold, metric = "RMSE")
-    
+    print("finished fitting", train_index[0], "  score: ", score)
     return score
     
     

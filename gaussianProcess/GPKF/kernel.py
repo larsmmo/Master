@@ -111,7 +111,7 @@ class Kernel(ABC):
         """
         K = self.kernel.K(X1, X2)   # .K = GPy kernel sampling, see their documentation
         if X2 is None:
-            K[np.diag_indices_from(K)] += 1e-4 # Add epsilon to diagonal for numerical stability (helps ensure positive-definiteness)
+            K[np.diag_indices_from(K)] += 1e-5 # Add epsilon to diagonal for numerical stability (helps ensure positive-definiteness)
         
         return K
         
@@ -125,6 +125,17 @@ class Kernel(ABC):
         """
         assert isinstance(other, Kernel), "Can only add other kernels to a kernel..."
         return AddedKernels([self, other])
+    
+    def __mul__(self, other):
+        """
+        Add another kernel to this kernel
+        INPUT:
+            other: the other kernel to add
+        OOUTPUT:
+            combined kernel
+        """
+        assert isinstance(other, Kernel), "Can only add other kernels to a kernel..."
+        return ProductKernels([self, other])
     
     def __str__(self):
         return str(vars(self))
@@ -195,7 +206,7 @@ class ProductKernels(CombinationKernel):
         self.kernel = kernels[0].kernel * kernels[1].kernel
         
     def psd(self):
-        raise NotImplementedError("Attempting to get psd of multiplied kernels not implemented. Try getting psd for each separate kernel instead...")
+        raise NotImplementedError("Attempting to get psd of multiplied kernels is not implemented. Try getting psd for each separate kernel instead...")
         
     def createDiscreteTimeSys(self, Ts = 1.0):
         A = np.array((0,), ndmin=2)
@@ -208,7 +219,7 @@ class ProductKernels(CombinationKernel):
             
             #if part.__class__.__name__ == 'CosineKernel':
             
-            A = np.kron(A, At)
+            A = np.kron(A, np.eye(At.shape[0])) + np.kron(np.eye(A.shape[0]), At)
             C = np.kron(C, Ct)
             V = np.kron(V, Vt)
             Q = np.kron(Q, Qt)
@@ -227,6 +238,9 @@ class ProductKernels(CombinationKernel):
             F = np.kron(F, np.eye(Ft.shape[0])) + np.kron(np.eye(F.shape[0]), Ft)
         
         return F
+    
+    def state_transition():
+        raise NotImplementedError("Attempting to get state transition matrix of multiplied kernels is not implemented. Try getting it for each separate kernel instead...")
     
     
 class Exponential(Kernel):
@@ -264,7 +278,7 @@ class Matern52(Kernel):
         super().__init__(GPy.kern.Matern52(input_dim = input_dim, active_dims = active_dims, lengthscale = lengthscale, variance = variance, ARD = ARD))
     
     def psd(self):
-        lam = np.sqrt(3.0)/self.lengthscale
+        lam = np.sqrt(5.0)/self.lengthscale
         num = np.array([np.sqrt(self.variance * 400.0 * 5.0**0.5/ 3.0 / self.lengthscale **5.0)])
         den = np.array([lam ** 3.0, 3.0*lam**2.0, 3.0*lam])
         
@@ -279,23 +293,10 @@ class Matern52(Kernel):
                               [lam ** 3 * (0.5 * TsLam - 1.0), lam ** 2 * (TsLam - 3), lam * (0.5 * TsLam - 2.0)]])
                + np.eye(3))
 
-
-class Cosine(Kernel):
-    def __init__(self, variance, lengthscale, period):
-        self.variance = variance
-        self.lengthscale = lengthscale
-        self.period = period
-        
-    def psd(self):
-        return 0
-        
-    def state_transition(self, Ts):
-        
-        return np.array([[np.cos(self.period), ]])
     
 class Periodic(Kernel):
     def __init__(self, input_dim, variance, lengthscale, period):
-        super().__init__(GPy.kern.StdPeriodic(input_dim=input_dim, variance = variance, lengthscale=lengthscale, period=period))
+        super().__init__(GPy.kern.StdPeriodic(input_dim=input_dim, variance = variance, lengthscale=lengthscale, period = period))
         self.variance = variance
         self.lengthscale = lengthscale
         self.freq= period
@@ -308,8 +309,8 @@ class Periodic(Kernel):
         self.kernel[:] = hyperparams
     
     def psd(self):
-        num = np.sqrt(2*self.lengthscale / self.variance) * np.array([np.sqrt((1/self.variance)**2 + (2*np.pi*self.freq)**2) , 1])       
-        den = np.array([((1/self.variance)**2 + (2*np.pi*self.freq)**2 ), 2/self.variance])
+        num = np.sqrt(2*self.lengthscale / self.variance) * np.array([np.sqrt((1/self.variance)**2 + (2*np.pi/self.freq)**2) , 1])       
+        den = np.array([((1/self.variance)**2 + (2*np.pi/self.freq)**2 ), 2/self.variance])
         
         return num, den
     
