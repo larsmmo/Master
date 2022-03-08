@@ -5,6 +5,11 @@ import re
 import seaborn as sns
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
+from matplotlib.patches import FancyArrowPatch
+from mpl_toolkits.mplot3d import Axes3D
+from mpl_toolkits.mplot3d import proj3d
+import mpl_toolkits.mplot3d.art3d as art3d
+from matplotlib import cm
 from matplotlib import animation
 from IPython import display
 
@@ -23,6 +28,79 @@ def plot_gp(mu, cov, X, X_train=None, Y_train=None, samples=[]):
         plt.plot(X_train, Y_train, 'rx')
     plt.legend()
 """
+
+class Arrow3D(FancyArrowPatch):
+    """
+    Class for drawing customized arrows
+    """
+    def __init__(self, xs, ys, zs, *args, **kwargs):
+        FancyArrowPatch.__init__(self, (0,0), (0,0), *args, **kwargs)
+        self._verts3d = xs, ys, zs
+
+    def draw(self, renderer):
+        xs3d, ys3d, zs3d = self._verts3d
+        xs, ys, zs = proj3d.proj_transform(xs3d, ys3d, zs3d, renderer.M)
+        self.set_positions((xs[0],ys[0]),(xs[1],ys[1]))
+        FancyArrowPatch.draw(self, renderer)
+        
+def draw_3d_sensor_heatmap(locations, data, compass = True, compassPos = np.array([18, -20, -12.0]), arrowLength = 8):
+    """
+    Convenience function for plotting a heatmap using sensor positions and data for heatmap.
+    Tip: use ""%matplotlib qt" before calling this function to move the 3d plot around
+    """
+    fig = plt.figure(figsize=(10,8))
+    ax = fig.add_subplot(111, projection='3d')
+    
+    x = np.array([v[0] for v in locations])
+    y = np.array([v[2] for v in locations])
+    z = np.array([v[1] for v in locations])
+    
+    cageRadius = 25
+    distanceFromEdge = np.array([np.linalg.norm(d) - 25 for d in [a[[0,2]] for a in locations]]) # Distance from the edges of the cage
+    
+    # Plot points
+    cube = ax.scatter(x, y, z, zdir='z', c=data, cmap="winter", s = 40, edgecolors = ['k' if d > 0 else 'w' for d in distanceFromEdge], linewidth = 1.0, alpha = 1)  # Plot the cube
+    cbar = fig.colorbar(cube, shrink=0.6, aspect=5)
+
+    # Cylinder for the lice skirt
+    center = 0
+    us = np.linspace(0, 2 * np.pi, 32)
+    zs = np.linspace(0, -10, 2)
+
+    us, zs = np.meshgrid(us, zs)
+
+    xs = cageRadius * np.cos(us)
+    ys = cageRadius * np.sin(us)
+    
+    ax.plot_surface(xs, ys, zs, linewidth = 0, alpha=0.15)
+    
+    if compass:
+        # Draw a compass with needles and directions
+        eastArrow = Arrow3D([compassPos[0],compassPos[0] + arrowLength],[compassPos[1],compassPos[1]],[compassPos[2],compassPos[2]], mutation_scale=20, lw=2, arrowstyle="->", color="k")
+        northArrow = Arrow3D([compassPos[0],compassPos[0]], [compassPos[1],compassPos[1] + arrowLength], [compassPos[2],compassPos[2]], mutation_scale=20, lw=2, arrowstyle="->", color="b")
+        westArrow = Arrow3D([compassPos[0],compassPos[0] - arrowLength],[compassPos[1],compassPos[1]],[compassPos[2],compassPos[2]], mutation_scale=20, lw=2, arrowstyle="->", color="k")
+        southArrow = Arrow3D([compassPos[0],compassPos[0]],[compassPos[1],compassPos[1] - arrowLength],[compassPos[2],compassPos[2]], mutation_scale=20, lw=2, arrowstyle="->", color="r")
+
+        ax.add_artist(northArrow)
+        ax.add_artist(southArrow)
+        ax.add_artist(eastArrow)
+        ax.add_artist(westArrow)
+
+        ax.text(compassPos[0] + (arrowLength + 2), compassPos[1], compassPos[2], "E", va = "center", ha = "center")
+        ax.text(compassPos[0] - (arrowLength + 2), compassPos[1], compassPos[2], "W", va = "center", ha = "center")
+        ax.text(compassPos[0], compassPos[1] + (arrowLength + 2), compassPos[2], "N", va = "center", ha = "center")
+        ax.text(compassPos[0], compassPos[1] - (arrowLength + 2), compassPos[2], "S", va = "center", ha = "center")
+
+    # Top edge of the cage
+    cage_circle=plt.Circle((center, center), cageRadius, color='black', fill=False, linewidth = 3, alpha = 0.5)
+    ax.add_patch(cage_circle)
+    art3d.pathpatch_2d_to_3d(cage_circle, z=0, zdir="z")
+
+    ax.set_zlim(-12.5,-1)
+
+    ax.set_xlabel("X")
+    ax.set_ylabel("Y")
+    ax.set_zlabel("Z")
 
 def plot_gpkf(x_mesh, x, y, y_pred, y_cov, samples=[], **kwargs):
     if y_cov.ndim > 1:
