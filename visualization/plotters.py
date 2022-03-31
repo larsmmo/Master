@@ -114,7 +114,7 @@ def plot_gpkf(x_mesh, x, y, y_pred, y_cov, samples=[], **kwargs):
     plt.fill_between(np.ravel(x_mesh), y_pred + uncertainty, y_pred - uncertainty, alpha=0.1, label='95% confidence interval')
     
     for i, sample in enumerate(samples):
-        plt.plot(x_mesh, sample, lw=1, ls='--', label=f'Sample {i+1}')
+        plt.plot(x_mesh, sample, lw=2, ls='--', label=f'Sample {i+1}')
         
     plt.xlabel('$x$')
     plt.ylabel('$f(x)$')

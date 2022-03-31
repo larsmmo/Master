@@ -18,14 +18,6 @@ class Gpkf:
         self.alpha = alpha
         self.normalize_y = normalize_y
         
-        """# standardize measurements
-        self.y_train_mean = np.nanmean(y_train)
-        self.y_train_std = np.nanstd(y_train)
-        #self.y_train = (y_train.copy() - self.y_train_mean) / self.y_train_std if normalize_y else y_train.copy()
-        self.y_train = (y_train-self.y_train_mean) if normalize_y else y_train
-        
-        self.y_train_timeInstants = y_train_timeInstants"""
-        
         """# set up noise variance matrix
         noiseVar =  (params.data['noiseStd']**2) * np.ones(y_train.shape) # (params.data['noiseStd'] * np.abs(y_train))**2 
         noiseVar[np.isnan(noiseVar)] = np.inf
@@ -93,12 +85,12 @@ class Gpkf:
         def obj(theta):
             # Set hyperparameters to theta
             self.kernel_time.set_hyperparams(theta[:time_params_n])
-            self.kernel_space.set_hyperparams(theta[time_params_n:])
-            
+            self.kernel_space.set_hyperparams(theta[time_params_n:(time_params_n+space_params_n)])
+            #self.alpha = theta[-1]
             #print(theta)
             
             # Calculate covariances for space kernel
-            Kss = self.kernel_space.sample(spaceLocsMeas)
+            Kss = self.kernel_space.sample(spaceLocsMeas, spaceLocsMeas)
             Ks_chol = np.linalg.cholesky(Kss).conj().T
             
             self.a, self.c, self.v0, self.q = self.kernel_time.createDiscreteTimeSys()
@@ -109,14 +101,22 @@ class Gpkf:
             V0 = np.kron(I, self.v0)
             Q = np.kron(I, self.q)
             
+            # Create noise matrix
+            """
+            self.noiseVar = (self.alpha**2) * np.ones(y.shape)
+
+            for t in np.arange(0, numTimeInstants):
+                R[:,:,t] = np.diag(self.noiseVar[:,t]).copy()
+            """
             score = None
             
             if fun == 'nll':
-                x,V,xp,Vp,logMarginal = self.kalmanEst(A,C,Q,V0,R, y, computeLikelihood = True)
+                x,V,xp,Vp,logMarginal = self.kalmanEst(A,C,Q,V0,R, self.y_train, computeLikelihood = True)
                 score = logMarginal
             elif fun == 'RMSE':
-                score = self.score(spaceLocsMeas, timeInstants, y, metric = 'RMSE')
+                score = self.score(spaceLocsMeas, timeInstants, y , metric = 'RMSE')
             
+            print("score:")
             print(score)
             
             return score
@@ -126,7 +126,8 @@ class Gpkf:
         if self.normalize_y:
             self.y_train_mean = np.nanmean(y)
             self.y_train_std = np.nanstd(y)
-            self.y_train = y - self.y_train_mean
+            #y = (y - self.y_train_mean)/self.y_train_std
+            self.y_train = (y - self.y_train_mean)/self.y_train_std
         else:
             self.y_train_mean = 0
             self.y_train_std = 1
@@ -134,14 +135,14 @@ class Gpkf:
         
         self.y_train_timeInstants = timeInstants
         
+        # Create noise matrix
+        self.noiseVar = (self.alpha**2) * np.ones(y.shape)
+        
         if optimize is True and fun is not None:
             # Getting some useful values
             numSpaceLocs, numTimeInstants = y.shape
             time_params_n = len(self.kernel_time.kernel[:])
             space_params_n = len(self.kernel_space.kernel[:])
-
-            # Create noise matrix
-            self.noiseVar = (self.alpha**2) * np.ones(y.shape)
 
             I = np.eye(numSpaceLocs)
             R = np.zeros((numSpaceLocs, numSpaceLocs, numTimeInstants))
@@ -169,7 +170,11 @@ class Gpkf:
 
             # Update parameters with best results
             self.kernel_time.set_hyperparams(res.x[:time_params_n])
-            self.kernel_space.set_hyperparams(res.x[time_params_n:])
+            self.kernel_space.set_hyperparams(res.x[time_params_n:(time_params_n+space_params_n)])
+            #self.alpha = res.x[-1]
+            
+            print("alpa:")
+            print(self.alpha)
 
             # Update state-space representation
             self.a, self.c, self.v0, self.q = self.kernel_time.createDiscreteTimeSys()
@@ -195,12 +200,12 @@ class Gpkf:
         # initialize quantities needed for kalman estimation
         I = np.eye(numSpaceLocs)
         A = np.kron(I,self.a)
-        Ks_chol = np.linalg.cholesky(self.kernel_space.sample(self.spaceLocsMeas)).conj().T
+        Ks_chol = np.linalg.cholesky(self.kernel_space.sample(self.spaceLocsMeas, self.spaceLocsMeas)).conj().T
         C = Ks_chol @ np.kron(I, self.c)
         V0 = np.kron(I,self.v0)
         Q = np.kron(I,self.q)
         R = np.zeros((numSpaceLocs, numSpaceLocs, numTimeInstants))
-        self.noiseVar = (self.alpha**2) * np.ones(y.shape)
+        #self.noiseVar = (self.alpha**2) * np.ones(y.shape)
         for t in np.arange(0, numTimeInstants):
             R[:,:,t] = np.diag(self.noiseVar[:,t]).copy()
         
@@ -247,14 +252,15 @@ class Gpkf:
         
         if timeInstants is not None:
             if timeInstants[-1] > self.y_train_timeInstants[-1]:  # TODO: rework to add predictions inbetween measurements
-                # Add locations we want to predict for that are after t_k (last fitted measurement in time)
+                # Add entries we want to predict for that are after t_k (last fitted measurement in time)
                 y = np.concatenate((self.y_train, np.full((self.y_train.shape[0], int(timeInstants[-1] - self.y_train_timeInstants[-1])), np.nan)), axis=1)
                 self.y_train = y
                 self.y_train_timeInstants = np.arange(self.y_train_timeInstants[0], timeInstants[-1] + 1)
-                #self.noiseVar = (self.params.data['noiseStd']**2) * np.ones(y.shape)
+                self.noiseVar = (self.alpha**2) * np.ones(y.shape)
                 
             else:
                 y = self.y_train
+                self.noiseVar = (self.alpha**2) * np.ones(y.shape)
         """else:
             y = self.y_train"""
             
@@ -263,8 +269,8 @@ class Gpkf:
         #print(logMarginal)
 
         kernelSection = self.kernel_space.sample(spaceLocsPred, self.spaceLocsMeas)
-        kernelPrediction = self.kernel_space.sample(spaceLocsPred, spaceLocsPred)
-        Ks = self.kernel_space.sample(self.spaceLocsMeas)
+        kernelPrediction = self.kernel_space.sample(spaceLocsPred, spaceLocsPred) # self.kernel_space.sample(spaceLocsPred, spaceLocsPred)
+        Ks = self.kernel_space.sample(self.spaceLocsMeas, self.spaceLocsMeas)
         Ks_inv = np.linalg.inv(Ks)
 
         numSpaceLocsPred = np.max(spaceLocsPred.shape)
@@ -279,8 +285,8 @@ class Gpkf:
             
         # Undo normalization
         if self.normalize_y:
-            #predictedMean = self.y_train_std * predictedMean + self.y_train_mean
-            predictedMean = predictedMean + self.y_train_mean
+            predictedMean = self.y_train_std * predictedMean + self.y_train_mean
+            #predictedMean = predictedMean + self.y_train_mean
             #predictedCov = predictedCov * self.y_train_std**2
         
         # If no timeInstants are given, return predictions for all times between the first and last measurement in y_train
