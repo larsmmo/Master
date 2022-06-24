@@ -103,15 +103,16 @@ def draw_3d_sensor_heatmap(locations, data, compass = True, compassPos = np.arra
     ax.set_zlabel("Z")
 
 def plot_gpkf(x_mesh, x, y, y_pred, y_cov, samples=[], **kwargs):
+
     if y_cov.ndim > 1:
-        uncertainty = 3 * np.sqrt(np.abs(np.diag(y_cov)))
+        uncertainty = 2 * np.sqrt(np.abs(np.diag(y_cov)))
     else:
-        uncertainty = 3 * np.sqrt(np.abs(np.squeeze(y_cov)))
+        uncertainty = 2 * np.sqrt(np.abs(np.squeeze(y_cov)))
     #plt.figure(num = None, figsize=(16,12))
     
     plt.plot(x, y, markersize=6, color='r', label='Measurements', **kwargs) # linestyle='none', marker='o',
     plt.plot(x_mesh, y_pred, label='Prediction')
-    plt.fill_between(np.ravel(x_mesh), y_pred + uncertainty, y_pred - uncertainty, alpha=0.1, label='95% confidence interval')
+    plt.fill_between(np.ravel(x_mesh), y_pred + uncertainty, y_pred - uncertainty, alpha=0.2, label='95% confidence interval')
     
     for i, sample in enumerate(samples):
         plt.plot(x_mesh, sample, lw=2, ls='--', label=f'Sample {i+1}')

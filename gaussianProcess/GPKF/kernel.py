@@ -2,6 +2,7 @@ import numpy as np
 from numpy.linalg import multi_dot
 from sklearn.gaussian_process.kernels import Matern
 from scipy.linalg import solve_continuous_lyapunov, block_diag, expm
+from scipy import special as special
 import GPy
 
 from abc import ABC, abstractmethod
@@ -82,7 +83,7 @@ class Kernel(ABC):
         G = np.eye(1, state_dim, k = state_dim-1).T # Input matrix
         
         # output matrix
-        C = np.zeros((1,state_dim))[0]
+        C = np.zeros(state_dim)
         C[0:np.max(num_coeff.shape)] = num_coeff
 
         # state variance as solution of the lyapunov equation
@@ -173,7 +174,7 @@ class AddedKernels(CombinationKernel):
         self.kernel = kernels[0].kernel + kernels[1].kernel
         
     def psd(self):
-        raise NotImplementedError("Attempting to get psd of added kernels not implemented. Try getting psd for each separate kernel instead...")
+        raise NotImplementedError("Getting psd of added kernels is not implemented. Try getting psd for each separate kernel instead...")
         
     def createDiscreteTimeSys(self, Ts = 1.0):
         A = None
@@ -210,7 +211,7 @@ class ProductKernels(CombinationKernel):
         
     def createDiscreteTimeSys(self, Ts = 1.0):
         A = np.array((0,), ndmin=2)
-        C = np.array((1,), ndmin=2)
+        C = np.array((1,), ndmin=1)
         V = np.array((1,), ndmin=2)
         Q = np.array((1,), ndmin=2)
         
@@ -309,8 +310,8 @@ class Periodic(Kernel):
         self.kernel[:] = hyperparams
     
     def psd(self):
-        num = np.sqrt(2*self.lengthscale / self.variance) * np.array([np.sqrt((1/self.variance)**2 + (2*np.pi/self.freq)**2) , 1])       
-        den = np.array([((1/self.variance)**2 + (2*np.pi/self.freq)**2 ), 2/self.variance])
+        num = np.sqrt(2*self.variance / self.lengthscale) * np.array([np.sqrt((1/self.lengthscale)**2 + (2*np.pi/self.freq)**2) , 1])       
+        den = np.array([((1/self.lengthscale)**2 + (2*np.pi/self.freq)**2 ), 2/self.lengthscale])
         
         return num, den
     
@@ -320,20 +321,81 @@ class Periodic(Kernel):
         F[1, :] = -den
         return expm(F * Ts)
 
+class CanonicalPeriodic(Kernel):
+    """
+    Periodic state-space representation (Inspired by GPy class: sde_standard_periodic)
     
-class PeriodicMatern12(Kernel):
-    def __init__(self, variance, lengthscale, freq):
-        super().__init__(Gpy.kern.PeriodicMatern32(input_dim = input_dim, variance = variance, period = freq))
-        self.freq = freq
+    Reference:
+    [1] Arno Solin and Simo Särkkä (2014). Explicit link between periodic 
+        covariance functions and state space models. In Proceedings of the 
+        Seventeenth International Conference on Artifcial Intelligence and 
+        Statistics (AISTATS 2014). JMLR: W&CP, volume 33.  
+    """
+    def __init__(self, input_dim, variance, lengthscale, period, order = 6):
+        super().__init__(GPy.kern.StdPeriodic(input_dim=input_dim, variance = variance, lengthscale=lengthscale, period = period))
+        self.variance = variance
+        self.lengthscale = lengthscale
+        self.freq= period
+        self.order = order
         
+    def set_hyperparams(self, hyperparams):
+        self.variance = hyperparams[0]
+        self.freq = hyperparams[1]
+        self.lengthscale = hyperparams[2]
+        
+        self.kernel[:] = hyperparams
+        
+    def createDiscreteTimeSys(self, Ts = 1.0):
+
+        F, state_dim = self.state_matrix()          # State matrix
+        A = self.state_transition(Ts)               # State transition matrix 
+        G = np.eye(1, state_dim, k = state_dim-1).T # Input matrix
+        
+        # output matrix
+        C = np.kron(np.ones((1, self.order +1)),np.array((1,0)))[0]
+        
+        # Coefficients
+        q2 = 2*self.variance*np.exp(-(self.lengthscale*2)**(-2) ) * special.iv(range(0,self.order+1),1.0/(self.lengthscale*2)**(2))
+        q2[0] = 0.5*q2[0]
+        
+        #V = solve_continuous_lyapunov(F, -np.matmul(G, G.conj().T))
+        V = np.kron(np.diag(q2), np.eye(2))
+        
+        Q = np.zeros((state_dim, state_dim))
+
+        return A, C, V, Q
+        
+    def state_matrix(self):
+        w0 = 2*np.pi/self.freq
+        F = np.kron(np.diag(range(0,self.order+1)),np.array(((0, -w0), (w0, 0))))
+        state_dim = 2*(self.order+1)
+        return F, state_dim
+    
+    def state_transition(self, Ts = 1.0):
+        w0 = 2*np.pi/self.freq
+        harmonics = np.arange(self.order + 1) * w0
+        rot = np.zeros((len(harmonics),2,2))
+        
+        for i,h in enumerate(harmonics):
+            rot[i] = np.array([[np.cos(h * Ts), -np.sin(h * Ts)],
+                                [np.sin(h* Ts),  np.cos(h * Ts)]])
+
+        A = np.block([
+            [rot[0], np.zeros([2, 12])],
+            [np.zeros([2, 2]),  rot[1], np.zeros([2, 10])],
+            [np.zeros([2, 4]),  rot[2], np.zeros([2, 8])],
+            [np.zeros([2, 6]),  rot[3], np.zeros([2, 6])],
+            [np.zeros([2, 8]),  rot[4], np.zeros([2, 4])],
+            [np.zeros([2, 10]), rot[5], np.zeros([2, 2])],
+            [np.zeros([2, 12]), rot[6]]
+        ])
+        return A
+    
     def psd(self):
         return 0
     
-    def state_transition_matrix(self):
-        return np.array([[-1/self.lengthscale, -self.freq], [self.freq, -1/self.lengthscale]])
     
-    
-class PeriodcMatern32(Kernel):
+class PeriodicMatern32(Kernel):
     def __init__(self, variance, lengthscale, period):
         super().__init__(Gpy.kern.PeriodicMatern32(input_dim = input_dim, variance = variance, period = period))
         self.freq = freq

@@ -12,28 +12,19 @@ from kernel import Kernel
 from params import Params
 
 class Gpkf:
-    def __init__(self, kernel_time, kernel_space, alpha = 0.5, normalize_y = True, ID = 0):
+    def __init__(self, kernel_time, kernel_space, alpha = 0.05, normalize_y = True, ID = 0):
         
         self.ID = ID
         self.alpha = alpha
         self.normalize_y = normalize_y
         
-        """# set up noise variance matrix
-        noiseVar =  (params.data['noiseStd']**2) * np.ones(y_train.shape) # (params.data['noiseStd'] * np.abs(y_train))**2 
-        noiseVar[np.isnan(noiseVar)] = np.inf
-        noiseVar[y_train==0] = params.data['noiseStd']**2
-        self.noiseVar = noiseVar"""
-        
         # Set time kernel
         self.kernel_time = kernel_time
+        self.init_time = 0
         
         # Set space kernel
         self.kernel_space = kernel_space
-        #self.Ks_chol = np.linalg.cholesky(self.kernel_space.sample(self.params.data['spaceLocsMeas'])).conj().T
-        
-        # Initialize DT state space model
-        self.a, self.c, self.v0, self.q = self.kernel_time.createDiscreteTimeSys()
-        
+
     
     """def set_params(self, **parameters):
 
@@ -54,8 +45,7 @@ class Gpkf:
         
         Output: An indexed dict containing all parameters for model instantiation
         """
-        """print({'params':self.params, 'n_restarts': self.n_restarts, 'kernel_time':self.kernel_time,
-                'kernel_space':self.kernel_space, 'normalize_y':self.normalize_y, 'y_train':self.y_train, 'y_train_timeInstants': self.y_train_timeInstants})"""
+        
         return {'alpha':self.alpha, 'kernel_time':self.kernel_time,
                 'kernel_space':self.kernel_space, 'normalize_y':self.normalize_y}
     
@@ -65,15 +55,8 @@ class Gpkf:
             setattr(self, parameter, value)
         return self
     
-    """def get_params(self,deep=True):
-
-        Function for getting parameters. Required for cross-validation (sklearn)
-        
-        Output: An indexed dict containing all hyperparameters in kernels
-
-        return {str(v): k for v, k in enumerate(np.concatenate((self.kernel_time.kernel[:], self.kernel_space.kernel[:]), axis=0))}"""
     
-    def fit(self, spaceLocsMeas, timeInstants, y, optimize = False, fun = None, n_restarts = 0):
+    def fit(self, spaceLocsMeas, timeInstants, y, u =np.array([]), optimize = False, fun = None, n_restarts = 0, bounds = None, focus = "simulation"):
         """
         INPUT:
             spaceLocsMeas: Spatial indices of measurements to be fitted
@@ -85,58 +68,72 @@ class Gpkf:
         def obj(theta):
             # Set hyperparameters to theta
             self.kernel_time.set_hyperparams(theta[:time_params_n])
-            self.kernel_space.set_hyperparams(theta[time_params_n:(time_params_n+space_params_n)])
-            #self.alpha = theta[-1]
+            self.kernel_space.set_hyperparams(theta[time_params_n:])
+            
             #print(theta)
             
             # Calculate covariances for space kernel
-            Kss = self.kernel_space.sample(spaceLocsMeas, spaceLocsMeas)
+            Kss = self.kernel_space.sample(spaceLocsMeas)
             Ks_chol = np.linalg.cholesky(Kss).conj().T
             
-            self.a, self.c, self.v0, self.q = self.kernel_time.createDiscreteTimeSys()
+            if issubclass(type(self.kernel_time), Kernel):
+                self.a, self.c, self.v0, self.q = self.kernel_time.createDiscreteTimeSys()
+                self.b = np.array([])
+            else:
+                # Exogenous input requires a state-space system with a B matrix
+                self.a, self.b, self.c, self.v0, self.q = self.kernel_time.createDiscreteTimeSys()
 
             # initialize quantities needed for kalman estimation
             A = np.kron(I, self.a)
+            B = np.vstack([self.b]*I.shape[0])
             C = Ks_chol @ np.kron(I,self.c)
             V0 = np.kron(I, self.v0)
             Q = np.kron(I, self.q)
             
-            # Create noise matrix
-            """
-            self.noiseVar = (self.alpha**2) * np.ones(y.shape)
-
-            for t in np.arange(0, numTimeInstants):
-                R[:,:,t] = np.diag(self.noiseVar[:,t]).copy()
-            """
             score = None
             
             if fun == 'nll':
-                x,V,xp,Vp,logMarginal = self.kalmanEst(A,C,Q,V0,R, self.y_train, computeLikelihood = True)
+                x,V,xp,Vp,logMarginal = self.kalmanEst(A,B,C,Q,V0,R, self.y_train, computeLikelihood = True)
                 score = logMarginal
             elif fun == 'RMSE':
-                score = self.score(spaceLocsMeas, timeInstants, y , metric = 'RMSE')
+                score = self.score(spaceLocsMeas, timeInstants, y, metric = 'RMSE')
             
-            print("score:")
             print(score)
             
             return score
         
         self.spaceLocsMeas = spaceLocsMeas
+        self.y_train_timeInstants = timeInstants
+        
+        self.u = u
+        
+        if issubclass(type(self.kernel_time), Kernel):
+            self.a, self.c, self.v0, self.q = self.kernel_time.createDiscreteTimeSys()
+            self.b = np.array([])
+            self.exogenous = False
+            #self.u = np.array([ [] for _ in range(y.shape[1]) ]).T
+        else:
+            # Exogenous input requires a state-space system with a B matrix
+            self.a, self.b, self.c, self.v0, self.q = self.kernel_time.createDiscreteTimeSys()
+            self.exogenous = True
+            self.init_time = self.kernel_time.get_init_time()
+            self.focus = focus # Simulation or prediction
+        
+        
+        # Create noise matrix
+        self.noiseVar = np.power((self.alpha * y), 2) #np.ones(y.shape)
+        #self.noiseVar = self.alpha**2 * np.ones(y.shape)
         
         if self.normalize_y:
             self.y_train_mean = np.nanmean(y)
             self.y_train_std = np.nanstd(y)
-            #y = (y - self.y_train_mean)/self.y_train_std
-            self.y_train = (y - self.y_train_mean)/self.y_train_std
+            #self.y_train = y - self.y_train_mean
+            self.y_train = (y - self.y_train_mean)#/self.y_train_std
         else:
             self.y_train_mean = 0
             self.y_train_std = 1
             self.y_train = y
-        
-        self.y_train_timeInstants = timeInstants
-        
-        # Create noise matrix
-        self.noiseVar = (self.alpha**2) * np.ones(y.shape)
+            
         
         if optimize is True and fun is not None:
             # Getting some useful values
@@ -148,10 +145,13 @@ class Gpkf:
             R = np.zeros((numSpaceLocs, numSpaceLocs, numTimeInstants))
             for t in np.arange(0, numTimeInstants):
                 R[:,:,t] = np.diag(self.noiseVar[:,t]).copy()
-
+                
+            if bounds is None:
+                bounds = [(1e-3, 1e+4) for i in range(time_params_n + space_params_n)]
+                
             # Use ML to find best kernel parameters using initial guess
             res = minimize(obj, np.concatenate((self.kernel_time.kernel[:], self.kernel_space.kernel[:]), axis=0), 
-                   bounds=[(1e-3, 1e+4) for i in range(time_params_n + space_params_n)],
+                   bounds= bounds,
                    method='L-BFGS-B')
 
             # Repeat for random guesses using loguniform
@@ -161,7 +161,7 @@ class Gpkf:
                 random_theta0 = loguniform.rvs(1e-4, 1e+4, size= time_params_n + space_params_n)
 
                 new_res = minimize(obj, random_theta0, 
-                   bounds=[(1e-3, 1e+4) for i in range(time_params_n + space_params_n)],
+                   bounds= bounds,
                    method='L-BFGS-B')
 
                 # Store best values
@@ -170,22 +170,22 @@ class Gpkf:
 
             # Update parameters with best results
             self.kernel_time.set_hyperparams(res.x[:time_params_n])
-            self.kernel_space.set_hyperparams(res.x[time_params_n:(time_params_n+space_params_n)])
-            #self.alpha = res.x[-1]
-            
-            print("alpa:")
-            print(self.alpha)
+            self.kernel_space.set_hyperparams(res.x[time_params_n:])
 
             # Update state-space representation
-            self.a, self.c, self.v0, self.q = self.kernel_time.createDiscreteTimeSys()
-            #self.Ks_chol = np.linalg.cholesky(self.kernel_space.sample(spaceLocsMeas)).conj().T
+            if issubclass(type(self.kernel_time), Kernel):
+                self.a, self.c, self.v0, self.q = self.kernel_time.createDiscreteTimeSys()
+                self.b = np.array([])
+            else:
+                # Exogenous input requires a state-space system with a B matrix
+                self.a, self.b, self.c, self.v0, self.q = self.kernel_time.createDiscreteTimeSys()
 
             print('Best hyperparameters and marginal log value')
             print(res.x)
             print(res.fun)
         
         
-    def estimate(self, y, prediction = True):
+    def estimate(self, y, u= np.array([]), prediction = True):
         """
         Returns the estimate of the GPKF algorithm
 
@@ -200,42 +200,58 @@ class Gpkf:
         # initialize quantities needed for kalman estimation
         I = np.eye(numSpaceLocs)
         A = np.kron(I,self.a)
-        Ks_chol = np.linalg.cholesky(self.kernel_space.sample(self.spaceLocsMeas, self.spaceLocsMeas)).conj().T
-        C = Ks_chol @ np.kron(I, self.c)
+        B = np.vstack([self.b]*I.shape[0])
+        self.Ks_chol = np.linalg.cholesky(self.kernel_space.sample(self.spaceLocsMeas, self.spaceLocsMeas)).conj().T
+        C = self.Ks_chol @ np.kron(I, self.c)
         V0 = np.kron(I,self.v0)
         Q = np.kron(I,self.q)
         R = np.zeros((numSpaceLocs, numSpaceLocs, numTimeInstants))
-        #self.noiseVar = (self.alpha**2) * np.ones(y.shape)
+
         for t in np.arange(0, numTimeInstants):
             R[:,:,t] = np.diag(self.noiseVar[:,t]).copy()
         
         # compute kalman estimate
-        x,V,xp,Vp,logMarginal = self.kalmanEst(A,C,Q,V0, R, y, computeLikelihood = False)
+        x,V,xp,Vp,logMarginal = self.kalmanEst(A,B,C,Q,V0,R,y,u, computeLikelihood = False)
 
         # output function
-        posteriorMean = np.matmul(C,x)
-        posteriorMeanPred = np.matmul(C,xp)
+        if self.exogenous:
+            posteriorMean = np.zeros((numSpaceLocs, numTimeInstants))
+            #posteriorMeanPred = np.zeros((numSpaceLocs, numTimeInstants))
+            self.coeffs = x
+        else:
+            posteriorMean = np.matmul(C,x)# + np.matmul(B,u)
+            #posteriorMeanPred = np.matmul(C,xp)# + np.matmul(B,u)
+            
+        # compute kalman estimate
+        x,V,xp,Vp,logMarginal = self.kalmanEst(A,B,C,Q,V0,R,y,u, computeLikelihood = False)
 
         # posterior variance
         O3 = np.zeros((numSpaceLocs, numSpaceLocs, numTimeInstants))
         posteriorCov = O3.copy()
-        posteriorCovPred = O3.copy()
+        #posteriorCovPred = O3.copy()
         outputCov = O3.copy()
-        outputCovPred = O3.copy()
+        #outputCovPred = O3.copy()
 
-        for t in np.arange(0, numTimeInstants):
-            # extract variance
-            posteriorCov[:,:,t] = C @ V[:,:,t] @ C.conj().T
-            posteriorCovPred[:,:,t] = C @ Vp[:,:,t] @ C.conj().T
+        for t in np.arange(0, numTimeInstants - self.init_time):
+            if self.exogenous and self.kernel_time.adaptive:
+                posteriorMean[:,t] = np.matmul(self.Cs[:,:,t], x[:,t])# + np.matmul(B,u)
+                #posteriorMeanPred[:,t] = np.matmul(self.Cs[:,:,t], xp[:,t])# + np.matmul(B,u)
+                
+                posteriorCov[:,:,t] = self.Cs[:,:,t] @ V[:,:,t] @ self.Cs[:,:,t].conj().T
+                #posteriorCovPred[:,:,t] = self.Cs[:,:,t] @ Vp[:,:,t] @ self.Cs[:,:,t].conj().T
+            else:
+                # extract variance
+                posteriorCov[:,:,t] = C @ V[:,:,t] @ C.conj().T
+                #posteriorCovPred[:,:,t] = C @ Vp[:,:,t] @ C.conj().T
             
             # compute output variance
             outputCov[:,:,t] = posteriorCov[:,:,t] + R[:,:,t]
-            outputCovPred[:,:,t] = posteriorCovPred[:,:,t] + R[:,:,t]
+            #outputCovPred[:,:,t] = posteriorCovPred[:,:,t] + R[:,:,t]
             
         # Undo normalization only if we predict at fitted locations
         if self.normalize_y and not prediction:
-            #posteriorMean = self.y_train_std * posteriorMean + self.y_train_mean
-            posteriorMean = posteriorMean + self.y_train_mean #+ np.nanmean(y)
+            posteriorMean = posteriorMean + self.y_train_mean
+            #posteriorMean = posteriorMean + self.y_train_mean #+ np.nanmean(y)
             #posteriorCov = posteriorCov * self.y_train_std**2
         
         return posteriorMean, posteriorCov, logMarginal
@@ -252,41 +268,46 @@ class Gpkf:
         
         if timeInstants is not None:
             if timeInstants[-1] > self.y_train_timeInstants[-1]:  # TODO: rework to add predictions inbetween measurements
-                # Add entries we want to predict for that are after t_k (last fitted measurement in time)
+                # Add locations we want to predict for that are after t_k (last fitted measurement in time)
                 y = np.concatenate((self.y_train, np.full((self.y_train.shape[0], int(timeInstants[-1] - self.y_train_timeInstants[-1])), np.nan)), axis=1)
                 self.y_train = y
+                
+                self.noiseVar = np.concatenate((self.noiseVar,np.full((self.noiseVar.shape[0], int(timeInstants[-1] - self.y_train_timeInstants[-1])), np.nan)), axis=1) 
+                
                 self.y_train_timeInstants = np.arange(self.y_train_timeInstants[0], timeInstants[-1] + 1)
-                self.noiseVar = (self.alpha**2) * np.ones(y.shape)
                 
             else:
                 y = self.y_train
-                self.noiseVar = (self.alpha**2) * np.ones(y.shape)
+
+            #self.noiseVar = (self.alpha**2) * np.ones(y.shape) # todo: zeros?
         """else:
             y = self.y_train"""
             
-        postMean, postCov, logMarginal = self.estimate(y)
+        postMean, postCov, logMarginal = self.estimate(y, self.u)
         
         #print(logMarginal)
 
         kernelSection = self.kernel_space.sample(spaceLocsPred, self.spaceLocsMeas)
-        kernelPrediction = self.kernel_space.sample(spaceLocsPred, spaceLocsPred) # self.kernel_space.sample(spaceLocsPred, spaceLocsPred)
+        kernelPrediction = self.kernel_space.sample(spaceLocsPred, spaceLocsPred)
         Ks = self.kernel_space.sample(self.spaceLocsMeas, self.spaceLocsMeas)
         Ks_inv = np.linalg.inv(Ks)
 
-        numSpaceLocsPred = np.max(spaceLocsPred.shape)
+        numSpaceLocsPred = spaceLocsPred.shape[0]
         numTimeInsts = y.shape[1] # np.max(self.params.data['timeInstants'].shape)
         predictedCov = np.zeros((numSpaceLocsPred, numSpaceLocsPred, numTimeInsts))
-        scale = self.kernel_time.sample(np.array([[0]]))[0][0]  # This is the same as gamma(0) = lengthscale
+        scale = self.kernel_time.sample(np.array([[0]]))[0][0]  # This is the same as gamma(0) = variance
         predictedMean = kernelSection @ (Ks_inv @ postMean)
-                
-        for t in np.arange(0, numTimeInsts):
+        
+        # Posterior variance
+        for t in np.arange(0, numTimeInsts-self.init_time):
+            if self.kernel_time.adaptive:
+                scale = self.errVar[t]
             W = Ks_inv @ (Ks - postCov[:,:,t].conj().T / scale) @ Ks_inv
             predictedCov[:,:,t] = scale * (kernelPrediction - kernelSection @ W @ kernelSection.conj().T)
             
         # Undo normalization
         if self.normalize_y:
-            predictedMean = self.y_train_std * predictedMean + self.y_train_mean
-            #predictedMean = predictedMean + self.y_train_mean
+            predictedMean =  predictedMean + self.y_train_mean
             #predictedCov = predictedCov * self.y_train_std**2
         
         # If no timeInstants are given, return predictions for all times between the first and last measurement in y_train
@@ -298,17 +319,17 @@ class Gpkf:
         
         return predictedMean, predictedCov
     
-    def kalmanEst(self, A, C, Q, V0, noiseVar, y, computeLikelihood = True):
+    def kalmanEst(self, A, B, C, Q, V0, noiseVar, y, u = np.array([]), computeLikelihood = True):
         """
         Returns the prediction and corrections computed by means of standard
         iterative kalman filtering procedure
 
-        INPUT:  (A,C,Q,V0) = model matrices, noise variance, targets
+        INPUT:  (A,C,Q,V0,u) = model matrices, noise variance, targets, exogenous variables
 
         OUTPUT: x,V,xp,Vp estimates and predictions with corresponding covariance.
                 logMarginal marginal log-likelihood
         """
-        numTimeInstants = y.shape[1]
+        numSpaceLocsMeas, numTimeInstants = y.shape
         stateDim = A.shape[0]
         I = np.eye(stateDim)
         logMarginal = 0
@@ -316,23 +337,51 @@ class Gpkf:
         # initialization
         xt = np.zeros((stateDim,1))
         Vt = V0
-        xp = np.zeros((stateDim,numTimeInstants))
-        Vp = np.zeros((stateDim,stateDim,numTimeInstants))
+        xp = 0#xp = np.zeros((stateDim,numTimeInstants))
+        Vp = 0#Vp = np.zeros((stateDim,stateDim,numTimeInstants))
         x = np.zeros((stateDim,numTimeInstants))
         V = np.zeros((stateDim,stateDim,numTimeInstants))
+        
+        if self.kernel_time.adaptive:
+            # Measurement matrix can change in time for adaptive scheme
+            self.Cs = np.zeros((C.shape[0], C.shape[1], numTimeInstants - self.init_time))
+            
+            self.errVar = np.zeros(numTimeInstants - self.init_time)
+            errors = np.zeros((numSpaceLocsMeas,1))
+            n_errors = 0
+            if self.focus == "simulation":
+                self.simulated = np.zeros((numSpaceLocsMeas, numTimeInstants))
 
-        for t in np.arange(0, numTimeInstants):
-            # prediction
+        for t in np.arange(0, numTimeInstants - self.init_time):
+            # Prediction
             xpt = A @ xt
             Vpt = A @ Vt @ A.conj().T + Q
+            
+            if self.kernel_time.adaptive:
+                if self.focus == "simulation":
+                    # Feed back estimated values (dynamic)
+                    C = self.Ks_chol @ self.kernel_time.measurement_matrix(t, self.simulated, self.u)
+                    self.simulated[:,[t + self.init_time]] = C @ xpt
+                    
+                elif self.focus == "prediction":
+                    C = self.Ks_chol @ self.kernel_time.measurement_matrix(t, self.y_train , self.u)
+                
+                self.Cs[:,:,t] = C[:,:]
 
-            # correction
+            # Correction
             notNanPos = np.logical_not(np.isnan(y[:,t]))
             Ct = C[notNanPos,:]
+            
             Rt = noiseVar[:,:,t][np.ix_(notNanPos, notNanPos)]
             
             # Error residual
-            innovation = y[:,t][np.newaxis].T[np.ix_(notNanPos)] -  np.dot(Ct, xpt)
+            innovation = y[:,t][np.newaxis].T[np.ix_(notNanPos)] - np.dot(Ct, xpt)
+            
+            if self.kernel_time.adaptive:
+                # Error variance of ARX
+                errors[notNanPos] += innovation
+                n_errors += sum(notNanPos)
+                self.errVar[t] = (np.linalg.norm(errors, 2)**2) / (2*(n_errors))
             
             # Common subexpression computation for performance
             VptCtt = np.dot(Vpt, Ct.conj().T)   
@@ -352,8 +401,8 @@ class Gpkf:
             #Vt = I_KdotCt @ Vpt  @ I_KdotCt.conj().T + (K @ Rt @ K.conj().T)
 
             # save values
-            xp[:,t] = xpt[:,0]
-            Vp[:,:,t] = Vpt[:,:]
+            #xp[:,t] = xpt[:,0]
+            #Vp[:,:,t] = Vpt[:,:]
             x[:,t] = xt[:,0]
             V[:,:,t] = Vt[:,:]
             
